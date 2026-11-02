@@ -1,7 +1,7 @@
 <h1 align="center">
   <img alt="Icon" src="src/common/images/brand/icon.png" height="100" width="100" />
   <br />
-  TTV LOL PRO (auto-proxy fork)
+  Twitch ad blocker
 </h1>
 
 <p align="center">
@@ -12,11 +12,11 @@
   <a href="#how-it-blocks-ads">How it works</a>
   ·
   <a href="#settings">Settings</a>
+  ·
+  <a href="#security">Security</a>
 </p>
 
-A fork of [TTV LOL PRO](https://github.com/younesaassila/ttv-lol-pro). Upstream needs a proxy in an ad-free country, which most people don't have. This fork finds and checks free proxies by itself. When none works, it falls back to ad-free copies of the stream that need no proxy at all. It also blocks the display ads around the player.
-
-Everything upstream does still works: your own proxies, whitelisted channels, the stream status popup, and the ad log.
+A browser extension for Chrome and Firefox that removes the ads Twitch stitches into live streams, and the display ads around the player. There's nothing to configure: no proxy to rent, no account, no server. It finds and checks free proxies in ad-free countries by itself. When none works, it plays ad-free copies of the stream that need no proxy at all.
 
 ## Install
 
@@ -25,14 +25,14 @@ Get the zip for your browser from the [release](https://github.com/coffeegrind12
 - **Chrome, Edge, Brave, Opera:** unzip `ttv-lol-pro-chromium.zip`. Open `chrome://extensions`, turn on Developer mode, click "Load unpacked" and pick the folder.
 - **Firefox:** open `about:debugging#/runtime/this-firefox`, click "Load Temporary Add-on" and pick `ttv-lol-pro-firefox.zip`. The build is unsigned, so regular Firefox removes it on restart. In [Firefox Developer Edition](https://www.mozilla.org/firefox/developer/) or Nightly, set `xpinstall.signatures.required` to `false` in `about:config` to install it permanently.
 
-Then reload any open Twitch tabs.
+Then reload any open Twitch tabs. In your browser's extension list it appears as **TTV LOL PRO**, the project it's built on.
 
 > [!WARNING]
-> Remove other Twitch ad blockers first, including the store version of TTV LOL PRO and any vaft userscript. Two of them fight over the same requests. [uBlock Origin](https://ublockorigin.com/) alongside is fine.
+> Remove any other Twitch ad blocker first, including TTV LOL PRO from the browser stores and any vaft userscript. Two of them fight over the same requests. [uBlock Origin](https://ublockorigin.com/) alongside is fine.
 
 ## How it blocks ads
 
-Twitch stitches ads into the video stream itself, so normal ad blockers can't see them. This fork uses three layers, each picking up what the previous one misses.
+Twitch stitches ads into the video stream itself, so normal ad blockers can't see them. The extension uses three layers, each picking up what the previous one misses.
 
 ### 1. Automatic proxies in ad-free countries
 
@@ -60,7 +60,7 @@ Twitch also shows ads next to the stream: above chat, squeezeback, lower third, 
 
 ## Countries without ads
 
-From the TTV LOL PRO knowledge base's [list of known ad-free countries](https://wiki.cdn-perfprod.com/guides/proxy/host-your-own-proxy):
+A community-maintained [list of known ad-free countries](https://wiki.cdn-perfprod.com/guides/proxy/host-your-own-proxy):
 
 |                                                             | Countries                                                                                                                                                                                          |
 | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -83,6 +83,7 @@ Everything below is on by default. Change it in the extension's options.
 | Allow a 360p backup as last resort            | Layer 2's `autoplay` step.                                                                                                  |
 | Block display ads                             | Layer 3. Skipped on whitelisted channels; takes effect on the next page load.                                               |
 | Whitelisted channels                          | Lets ads play on channels you want to support.                                                                              |
+| Proxies                                       | Your own proxies, used after the automatic ones.                                                                            |
 
 **Rejected proxies** are excluded for a while, depending on why they failed:
 
@@ -92,9 +93,36 @@ Everything below is on by default. Change it in the extension's options.
 | Unreachable                                             | 1 hour                                                                 |
 | Every proxy unreachable in a refresh                    | Not excluded: the cause is more likely your firewall, antivirus or ISP |
 
-## Privacy
+## Security
 
-Free proxies are run by strangers. Twitch traffic stays encrypted end to end, so a proxy sees which Twitch servers you connect to, but not what you watch or your login. Anonymous mode, on by default, also keeps your account out of proxied token requests. See [PRIVACY.md](PRIVACY.md) for what the extension contacts and why.
+Free proxies are run by strangers, so it's worth knowing what one can and can't do to you.
+
+**It can't change what you receive or run code in your browser.** Every request that goes through a proxy is HTTPS to Twitch. Your browser opens an encrypted tunnel to Twitch's server through the proxy and checks Twitch's certificate itself. The proxy only relays encrypted bytes: if it alters any, the connection fails. This is the same for HTTP, SOCKS4 and SOCKS5 proxies.
+
+**Little goes through it.** Only the playback token, the stream manifest and the stream's playlist requests during ads. Video segments, chat and the rest of twitch.tv go direct. Backup streams never use a proxy.
+
+**Nothing from a proxy or a list is ever run.** All of the extension's code comes from this repository. A proxy list is parsed as data, and only protocol, address and port are kept.
+
+**Lists can't point your browser at your own network.** An entry is used only if it's a public IPv4 address. The extension refuses:
+
+- hostnames, which can resolve to anything at connection time;
+- loopback, private (`10/8`, `172.16/12`, `192.168/16`), CGNAT, link-local, multicast, documentation and other reserved ranges;
+- an entire list, if every entry in it is such an address.
+
+Otherwise a tampered list could make the browser connect to your router or other devices on your LAN.
+
+**What a proxy does see:**
+
+- your IP address;
+- which Twitch hostnames you connect to (not the channel, which is inside the encryption);
+- timing.
+
+**What a proxy can do:**
+
+- drop, slow or refuse connections. The extension then moves on to the next proxy, a direct connection, or a backup stream;
+- let Twitch see that you use a proxy. Anonymous mode, on by default, keeps your Twitch account out of proxied token requests.
+
+See [PRIVACY.md](PRIVACY.md) for every service the extension contacts.
 
 ## Building
 
@@ -106,10 +134,8 @@ npm run lint && npm run type-check
 
 Every push to `main` is built by [CI](.github/workflows/build.yml), which replaces the single release with the new packages.
 
-## Credits
+## Credits and license
 
-- [TTV LOL PRO](https://github.com/younesaassila/ttv-lol-pro) by [Younes Aassila](https://github.com/younesaassila), with proxies and the ad-free country list by [Marc Gómez](https://github.com/zGato). This fork is built on their work.
-- [proxy-scraper](https://github.com/maximilianfeix/proxy-scraper) by Maximilian Feix, for the hourly proxy lists.
-- The backup-stream technique comes from the vaft userscript ([pixeltris/TwitchAdSolutions](https://github.com/pixeltris/TwitchAdSolutions)). The player-type order and the display-ad decline follow [scamorza/TwitchAdBlock](https://github.com/scamorza/TwitchAdBlock) (MIT).
+Built on [TTV LOL PRO](https://github.com/younesaassila/ttv-lol-pro) by Younes Aassila, with proxy work and the ad-free country list by Marc Gómez. Proxy lists come from [proxy-scraper](https://github.com/maximilianfeix/proxy-scraper) by Maximilian Feix. The backup-stream technique comes from the vaft userscript ([pixeltris/TwitchAdSolutions](https://github.com/pixeltris/TwitchAdSolutions)); the player-type order and the display-ad decline follow [scamorza/TwitchAdBlock](https://github.com/scamorza/TwitchAdBlock) (MIT).
 
-Licensed under [GPL-3.0](COPYING), like upstream.
+Licensed under [GPL-3.0](COPYING).
