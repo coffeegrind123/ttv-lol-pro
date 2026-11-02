@@ -104,6 +104,16 @@ Any questions? Please read the [wiki](https://wiki.ttvlolpro.com/) first.
   </div>
 </details>
 
+## Ad blocking without a proxy
+
+When an ad gets through, or no proxy works, the extension switches to an ad-free backup copy of the same live stream for the rest of the break. It requests the stream as another Twitch player, unproxied: `mobile_feed` (asked as Android), `popout`, `embed`, then `autoplay`, which Twitch caps at 360p. The first one whose playlist has no ad wins.
+
+Which session Twitch stitches ads into depends on the player type and platform in the playback token. Measured on 8 live channels under the same conditions, the normal web player (`site`) got ads on 4, and the backup types on none, at 1080p, except `autoplay`. The backup has to use the same codec as the player (AVC, HEVC or AV1), and a 360p backup is dropped once the break ends.
+
+It also stops Twitch from requesting display ads (above chat, squeezeback, lower third, pause ads) through the decline switch of Twitch's own ad manager, except on whitelisted channels.
+
+Both can be turned off in the options. The technique comes from the vaft userscript family ([pixeltris/TwitchAdSolutions](https://github.com/pixeltris/TwitchAdSolutions)); the player-type order and the display-ad decline follow [scamorza/TwitchAdBlock](https://github.com/scamorza/TwitchAdBlock) (MIT).
+
 ## Automatic proxies
 
 The "Block Ads" mode needs no setup: the extension finds proxies by itself.
@@ -113,6 +123,7 @@ The "Block Ads" mode needs no setup: the extension finds proxies by itself.
 3. It tests each one against Twitch from your browser, through the proxy itself: playback token, stream manifest, media playlist. A proxy is kept only if it answers, gets past Twitch's CDN (which turns most public proxies away), and Twitch itself places it in a selected country (`USER-COUNTRY`), whatever the list claimed.
 4. The working ones are tried first, ahead of the proxies in the "Proxies" list, which stay as the fallback.
 5. A proxy that lets an ad through, or that Twitch places in another country during playback, gets replaced.
+6. The options page lists why each proxy was rejected. Proxies that Twitch's CDN blocks, or that Twitch places in another country, are excluded for 6 hours; unreachable ones for 1 hour. If every proxy was unreachable, none is excluded, because the cause is more likely your network than the proxies.
 
 A test request can't show whether a country is ad-free: Twitch decides that per viewer during real playback. That's why step 5 judges proxies by what actually plays. "Unlock Best Quality" doesn't use automatic proxies, since Russia and South Korea cap quality at 720p.
 
