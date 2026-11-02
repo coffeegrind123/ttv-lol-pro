@@ -29,7 +29,43 @@ jobs:
       #   run: npm run test
       - name: Build for Firefox
         run: npm run build:firefox
+      - name: Package Firefox build
+        run: mkdir -p packages && (cd dist && zip -qr ../packages/ttv-lol-pro-firefox.zip .)
       - name: Clean up
         run: npm run clean
       - name: Build for Chromium
         run: npm run build:chromium
+      - name: Package Chromium build
+        run: (cd dist && zip -qr ../packages/ttv-lol-pro-chromium.zip .)
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: ttv-lol-pro-${{ github.sha }}
+          path: packages/*.zip
+          if-no-files-found: error
+
+  # Forks only: keep a rolling pre-release with installable packages of the
+  # latest `main`, so trying a change needs no local build.
+  publish:
+    name: Publish rolling pre-release
+    needs: build
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository != 'younesaassila/ttv-lol-pro' }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ttv-lol-pro-${{ github.sha }}
+          path: packages
+      - name: Replace the "latest-main" pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release delete latest-main --yes --cleanup-tag || true
+          gh release create latest-main packages/*.zip \
+            --prerelease \
+            --target "${{ github.sha }}" \
+            --title "Latest main (${GITHUB_SHA::7})" \
+            --notes "Built from ${{ github.sha }}. Chromium: unzip, then chrome://extensions > Developer mode > Load unpacked. Firefox: about:debugging > This Firefox > Load Temporary Add-on (unsigned)."
