@@ -20,6 +20,7 @@ export interface ProxyListResult {
   candidates: ProxyCandidate[];
   listSize: number;
   skippedMalformed: number;
+  skippedUnsafe: number; // Not a public IPv4 address (see `splitHostPort`).
 }
 
 /**
@@ -92,6 +93,7 @@ export function mergeProxyLists(lists: ProxyListResult[]): ProxyListResult {
       (sum, list) => sum + list.skippedMalformed,
       0
     ),
+    skippedUnsafe: lists.reduce((sum, list) => sum + list.skippedUnsafe, 0),
   };
 }
 
@@ -150,6 +152,7 @@ export function parseProxyList(
 function fromJsonEntries(sourceUrl: string, data: unknown[]): ProxyListResult {
   const candidates: ProxyCandidate[] = [];
   let skippedMalformed = 0;
+  let skippedUnsafe = 0;
 
   for (const raw of data) {
     if (typeof raw !== "object" || raw === null) {
@@ -160,7 +163,11 @@ function fromJsonEntries(sourceUrl: string, data: unknown[]): ProxyListResult {
 
     const protocol = PROTOCOL_MAP[String(entry.ptype ?? "").toLowerCase()];
     const hostPort = splitHostPort(String(entry.proxy ?? ""));
-    if (!protocol || !hostPort) {
+    if (hostPort === "unsafe") {
+      skippedUnsafe++;
+      continue;
+    }
+    if (!protocol || hostPort === "malformed") {
       skippedMalformed++;
       continue;
     }
@@ -187,6 +194,11 @@ function fromJsonEntries(sourceUrl: string, data: unknown[]): ProxyListResult {
     });
   }
 
+  if (data.length > 0 && candidates.length === 0 && skippedUnsafe > 0) {
+    throw new Error(
+      `every entry points at a private or reserved address (${skippedUnsafe}); refusing the list`
+    );
+  }
   if (data.length > 0 && candidates.length === 0 && skippedMalformed > 0) {
     throw new Error(
       `none of ${data.length} entries had the expected shape (first: ${JSON.stringify(data[0]).slice(0, 120)})`
@@ -197,12 +209,14 @@ function fromJsonEntries(sourceUrl: string, data: unknown[]): ProxyListResult {
     candidates: dedupe(candidates),
     listSize: data.length,
     skippedMalformed,
+    skippedUnsafe,
   };
 }
 
 function fromTextLines(sourceUrl: string, text: string): ProxyListResult {
   const candidates: ProxyCandidate[] = [];
   let skippedMalformed = 0;
+  let skippedUnsafe = 0;
   const lines = text.split(/\r?\n/).map(line => line.trim());
   const nonEmpty = lines.filter(line => line && !line.startsWith("#"));
 
@@ -216,7 +230,11 @@ function fromTextLines(sourceUrl: string, text: string): ProxyListResult {
     }
     const protocol = PROTOCOL_MAP[scheme];
     const hostPort = splitHostPort(rest);
-    if (!protocol || !hostPort) {
+    if (hostPort === "unsafe") {
+      skippedUnsafe++;
+      continue;
+    }
+    if (!protocol || hostPort === "malformed") {
       skippedMalformed++;
       continue;
     }
@@ -233,6 +251,11 @@ function fromTextLines(sourceUrl: string, text: string): ProxyListResult {
     });
   }
 
+  if (nonEmpty.length > 0 && candidates.length === 0 && skippedUnsafe > 0) {
+    throw new Error(
+      `every entry points at a private or reserved address (${skippedUnsafe}); refusing the list`
+    );
+  }
   if (nonEmpty.length > 0 && candidates.length === 0) {
     throw new Error(
       `no line looked like a proxy (first: ${JSON.stringify(nonEmpty[0].slice(0, 60))})`
@@ -243,19 +266,77 @@ function fromTextLines(sourceUrl: string, text: string): ProxyListResult {
     candidates: dedupe(candidates),
     listSize: nonEmpty.length,
     skippedMalformed,
+    skippedUnsafe,
   };
 }
 
-/**
- * IPv4 or hostname with a port. Credentials and IPv6 are rejected: public
- * lists don't carry either, and IPv6 exits can't reach Twitch (IPv4 only).
+/*
+ * IPv4 ranges a proxy from a public list must never be in (IANA IPv4
+ * special-purpose registry, RFC 6890 and successors). A list is untrusted
+ * input: an entry like 192.168.1.1:80 would make the browser open
+ * connections to the user's own router or LAN devices.
  */
-function splitHostPort(value: string): { host: string; port: number } | null {
+const RESERVED_IPV4_RANGES: readonly (readonly [string, number])[] =
+  Object.freeze([
+    ["0.0.0.0", 8], // "This network"
+    ["10.0.0.0", 8], // Private
+    ["100.64.0.0", 10], // Carrier-grade NAT
+    ["127.0.0.0", 8], // Loopback
+    ["169.254.0.0", 16], // Link-local
+    ["172.16.0.0", 12], // Private
+    ["192.0.0.0", 24], // IETF protocol assignments
+    ["192.0.2.0", 24], // Documentation (TEST-NET-1)
+    ["192.88.99.0", 24], // 6to4 relay anycast (deprecated)
+    ["192.168.0.0", 16], // Private
+    ["198.18.0.0", 15], // Benchmarking
+    ["198.51.100.0", 24], // Documentation (TEST-NET-2)
+    ["203.0.113.0", 24], // Documentation (TEST-NET-3)
+    ["224.0.0.0", 4], // Multicast
+    ["240.0.0.0", 4], // Reserved, and 255.255.255.255 broadcast
+  ]);
+
+function ipv4ToNumber(ip: string): number | null {
+  const parts = ip.split(".");
+  if (parts.length !== 4) return null;
+  let value = 0;
+  for (const part of parts) {
+    // Decimal only, no leading zeros: "010" is octal to some parsers.
+    if (!/^(0|[1-9]\d{0,2})$/.test(part)) return null;
+    const octet = Number(part);
+    if (octet > 255) return null;
+    value = value * 256 + octet;
+  }
+  return value;
+}
+
+export function isPublicIpv4(ip: string): boolean {
+  const value = ipv4ToNumber(ip);
+  if (value == null) return false;
+  return !RESERVED_IPV4_RANGES.some(([base, prefix]) => {
+    const size = 2 ** (32 - prefix);
+    const start = ipv4ToNumber(base)!;
+    return value >= start && value < start + size;
+  });
+}
+
+/**
+ * A public IPv4 address with a port, or why not.
+ *
+ * Hostnames are refused too: a name can resolve to a private address at
+ * connection time (DNS rebinding), and public lists carry IPs anyway.
+ * Credentials and IPv6 are refused: lists don't carry either, and IPv6
+ * exits can't reach Twitch (IPv4 only).
+ */
+function splitHostPort(
+  value: string
+): { host: string; port: number } | "malformed" | "unsafe" {
   const match = /^([A-Za-z0-9.-]+):(\d{1,5})$/.exec(value.trim());
-  if (!match) return null;
+  if (!match) return "malformed";
   const port = Number(match[2]);
-  if (port < 1 || port > 65535) return null;
-  return { host: match[1].toLowerCase(), port };
+  if (port < 1 || port > 65535) return "malformed";
+  const host = match[1].toLowerCase();
+  if (!isPublicIpv4(host)) return "unsafe";
+  return { host, port };
 }
 
 function normalizeCountry(value: unknown): string | null {

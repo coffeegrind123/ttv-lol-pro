@@ -33,6 +33,7 @@ import {
 } from "./probe";
 import {
   fetchProxyLists,
+  isPublicIpv4,
   selectCandidates,
   type ProxyCandidate,
 } from "./source";
@@ -297,6 +298,10 @@ async function runRefresh(
     // 1. Recheck the pool: drop proxies that stopped working or that are
     //    outside the (possibly changed) country selection.
     let pool = store.state.autoProxies.filter(entry => {
+      if (!isPublicIpv4(getProxyInfoFromUrl(entry.url).host)) {
+        log(`Dropping ${entry.url}: not a public IPv4 address`);
+        return false;
+      }
       if (countries.has(entry.twitchCountry)) return true;
       log(`Dropping ${entry.url}: ${entry.twitchCountry} no longer selected`);
       return false;
@@ -372,7 +377,7 @@ async function runRefresh(
         url => inPool.has(url) || isRejected(url)
       ).slice(0, AUTO_PROXY_MAX_PROBES_PER_REFRESH);
       log(
-        `List ${list.sourceUrl}: ${list.listSize} entries, ${list.skippedMalformed} malformed, ${candidates.length} candidates in ${[...countries].join(",")}`
+        `List ${list.sourceUrl}: ${list.listSize} entries, ${list.skippedMalformed} malformed, ${list.skippedUnsafe} not public IPv4, ${candidates.length} candidates in ${[...countries].join(",")}`
       );
       setStatus({
         state: "probing",
