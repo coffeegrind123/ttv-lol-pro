@@ -30,13 +30,13 @@ jobs:
       - name: Build for Firefox
         run: npm run build:firefox
       - name: Package Firefox build
-        run: mkdir -p packages && (cd dist && zip -qr ../packages/ttv-lol-pro-firefox.zip .)
+        run: mkdir -p packages && (cd dist/webext-prod && zip -qr ../../packages/ttv-lol-pro-firefox.zip .)
       - name: Clean up
         run: npm run clean
       - name: Build for Chromium
         run: npm run build:chromium
       - name: Package Chromium build
-        run: (cd dist && zip -qr ../packages/ttv-lol-pro-chromium.zip .)
+        run: (cd dist/webext-prod && zip -qr ../../packages/ttv-lol-pro-chromium.zip .)
       - name: Upload packages
         uses: actions/upload-artifact@v4
         with:
