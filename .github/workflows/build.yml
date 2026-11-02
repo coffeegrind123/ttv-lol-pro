@@ -44,28 +44,39 @@ jobs:
           path: packages/*.zip
           if-no-files-found: error
 
-  # Forks only: keep a rolling pre-release with installable packages of the
-  # latest `main`, so trying a change needs no local build.
+  # Forks only: exactly one release at a time, holding the packages of the
+  # latest `main`. Every other release and tag is deleted first, so the
+  # releases page never shows anything stale.
   publish:
-    name: Publish rolling pre-release
+    name: Publish the release
     needs: build
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository != 'younesaassila/ttv-lol-pro' }}
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: src/manifest.chromium.json
+          sparse-checkout-cone-mode: false
       - uses: actions/download-artifact@v4
         with:
           name: ttv-lol-pro-${{ github.sha }}
           path: packages
-      - name: Replace the "latest-main" pre-release
+      - name: Replace the release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          TAG: latest
         run: |
-          gh release delete latest-main --yes --cleanup-tag || true
-          gh release create latest-main packages/*.zip \
-            --prerelease \
-            --target "${{ github.sha }}" \
-            --title "Latest main (${GITHUB_SHA::7})" \
-            --notes "Built from ${{ github.sha }}. Chromium: unzip, then chrome://extensions > Developer mode > Load unpacked. Firefox: about:debugging > This Firefox > Load Temporary Add-on (unsigned)."
+          version=$(jq -r .version src/manifest.chromium.json)
+          # Every release, then every tag left without one.
+          gh api "repos/$GH_REPO/releases" --paginate --jq '.[].tag_name' |
+            while read -r tag; do gh release delete "$tag" --yes --cleanup-tag; done
+          gh api "repos/$GH_REPO/tags" --paginate --jq '.[].name' |
+            while read -r tag; do gh api -X DELETE "repos/$GH_REPO/git/refs/tags/$tag"; done
+          gh release create "$TAG" packages/*.zip \
+            --latest \
+            --target "$GITHUB_SHA" \
+            --title "TTV LOL PRO $version (${GITHUB_SHA::7})" \
+            --notes "Built from $GITHUB_SHA. Chromium: unzip, then chrome://extensions > Developer mode > Load unpacked > pick the folder. Firefox: about:debugging > This Firefox > Load Temporary Add-on > pick the zip (unsigned, so it lasts until Firefox restarts)."
