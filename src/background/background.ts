@@ -1,4 +1,9 @@
 import browser from "webextension-polyfill";
+import {
+  AUTO_PROXY_ALARM_NAME,
+  AUTO_PROXY_REFRESH_PERIOD_MINUTES,
+} from "../common/ts/autoProxy/constants";
+import { refreshAutoProxies } from "../common/ts/autoProxy/manager";
 import isChromium from "../common/ts/isChromium";
 import checkForOpenedTwitchTabs from "./handlers/checkForOpenedTwitchTabs";
 import onAuthRequired from "./handlers/onAuthRequired";
@@ -20,6 +25,23 @@ browser.runtime.onInstalled.addListener(onInstalled);
 
 // Cleanup session data in the store on startup.
 browser.runtime.onStartup.addListener(onStartupStoreCleanup);
+
+// Automatic proxies: verify the pool on install/startup, then every
+// AUTO_PROXY_REFRESH_PERIOD_MINUTES. `alarms.create` with an existing name
+// replaces the alarm, so re-registering on every wake is harmless.
+browser.alarms.create(AUTO_PROXY_ALARM_NAME, {
+  delayInMinutes: AUTO_PROXY_REFRESH_PERIOD_MINUTES,
+  periodInMinutes: AUTO_PROXY_REFRESH_PERIOD_MINUTES,
+});
+browser.alarms.onAlarm.addListener(alarm => {
+  if (alarm.name === AUTO_PROXY_ALARM_NAME) refreshAutoProxies("alarm");
+});
+browser.runtime.onInstalled.addListener(details => {
+  if (details.reason === "install" || details.reason === "update") {
+    refreshAutoProxies("install");
+  }
+});
+browser.runtime.onStartup.addListener(() => refreshAutoProxies("startup"));
 
 // Listen to messages from the content script.
 browser.runtime.onMessage.addListener(onContentScriptMessage);

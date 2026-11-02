@@ -1,7 +1,13 @@
 import browser, { WebRequest } from "webextension-polyfill";
+import {
+  recordProxiedUsherResponse,
+  recordProxiedVideoWeaverResponse,
+} from "../../common/ts/autoProxy/feedback";
+import { isProbeRequestUrl } from "../../common/ts/autoProxy/probe";
 import findChannelFromTwitchTvUrl from "../../common/ts/findChannelFromTwitchTvUrl";
 import findChannelFromUsherUrl from "../../common/ts/findChannelFromUsherUrl";
 import findChannelFromVideoWeaverUrl from "../../common/ts/findChannelFromVideoWeaverUrl";
+import { getAllKnownProxies } from "../../common/ts/getActiveProxies";
 import getHostFromUrl from "../../common/ts/getHostFromUrl";
 import { normalizeIpAddress } from "../../common/ts/ipAddress";
 import isChromium from "../../common/ts/isChromium";
@@ -28,6 +34,8 @@ export default async function onResponseStarted(
 ): Promise<void> {
   const host = getHostFromUrl(details.url);
   if (!host) return;
+  // The extension's own probes are not stream traffic.
+  if (isProbeRequestUrl(details.url)) return;
 
   let proxy: string | null = null;
   let errorMessage: string | null = null;
@@ -82,6 +90,7 @@ export default async function onResponseStarted(
       } catch {}
     }
     await updateStreamStatus(channelName, proxy, errorMessage);
+    recordProxiedUsherResponse(channelName, proxy);
 
     if (!proxy) {
       return console.log(
@@ -103,6 +112,7 @@ export default async function onResponseStarted(
       } catch {}
     }
     await updateStreamStatus(channelName, proxy, errorMessage);
+    recordProxiedVideoWeaverResponse(details.url, proxy);
 
     if (!proxy) {
       return console.log(
@@ -134,9 +144,7 @@ function getProxyFromDetails(
   }
 ): string | null {
   if (isChromium) {
-    const proxies = Array.from(
-      new Set([...store.state.optimizedProxies, ...store.state.normalProxies])
-    );
+    const proxies = getAllKnownProxies();
     const isDnsError =
       proxies.length !== 0 && store.state.dnsResponses.length === 0;
     if (isDnsError) {

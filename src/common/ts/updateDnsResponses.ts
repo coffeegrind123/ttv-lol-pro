@@ -1,6 +1,7 @@
 import { Address4, Address6 } from "ip-address";
 import store from "../../store";
 import type { DnsResponse, DnsResponseJson } from "../../types";
+import { getAllKnownProxies } from "./getActiveProxies";
 import { getProxyInfoFromUrl } from "./proxyInfo";
 
 const DNS_API = "https://cloudflare-dns.com/dns-query";
@@ -8,9 +9,7 @@ const MIN_TTL = 300;
 const INFINITE_TTL = -1;
 
 export default async function updateDnsResponses() {
-  const proxies = Array.from(
-    new Set([...store.state.optimizedProxies, ...store.state.normalProxies])
-  );
+  const proxies = getAllKnownProxies();
   const proxyInfoArray = proxies.map(getProxyInfoFromUrl);
 
   for (const proxyInfo of proxyInfoArray) {

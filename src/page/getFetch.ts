@@ -736,7 +736,15 @@ export default function getFetch(pageState: PageState): typeof fetch {
       responseBody ??= await readResponseBody();
       const responseBodyLower = responseBody.toLowerCase();
       const responseIncludesAd = responseBodyLower.includes("stitched-ad");
-      if (responseIncludesAd) logger.log("Ad detected.");
+      if (responseIncludesAd) {
+        logger.log("Ad detected.");
+        // The background knows whether this response came through an
+        // automatic proxy and drops proxies that let ads through.
+        pageState.sendMessageToContentScript({
+          type: MessageType.ProxiedAdDetected,
+          videoWeaverUrl: url,
+        });
+      }
       await waitForStore(pageState);
 
       //#region Ad replacement.

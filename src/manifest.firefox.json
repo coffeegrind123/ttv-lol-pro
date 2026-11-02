@@ -50,6 +50,7 @@
     "page": "options/page.html"
   },
   "permissions": [
+    "alarms",
     "proxy",
     "storage",
     "webRequest",

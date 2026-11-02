@@ -1,4 +1,9 @@
 import browser, { Runtime } from "webextension-polyfill";
+import {
+  onAdInVideoWeaverResponse,
+  onUsherCountry,
+} from "../../common/ts/autoProxy/feedback";
+import { refreshAutoProxies } from "../../common/ts/autoProxy/manager";
 import isChromium from "../../common/ts/isChromium";
 import { updateProxySettings } from "../../common/ts/proxySettings";
 import { getStreamStatus, setStreamStatus } from "../../common/ts/streamStatus";
@@ -109,5 +114,20 @@ export default function onContentScriptMessage(
       ...(streamStatus ?? { proxied: false, reason: "" }),
       proxyCountry,
     });
+    onUsherCountry(channel, proxyCountry);
+  }
+
+  if (message.type === MessageType.ProxiedAdDetected) {
+    if (typeof message.videoWeaverUrl === "string") {
+      onAdInVideoWeaverResponse(message.videoWeaverUrl);
+    }
+  }
+
+  // From the options page: answer once the refresh finishes.
+  if (message.type === MessageType.AutoProxyRefresh) {
+    return refreshAutoProxies(message.reason ?? "manual").then(status => ({
+      type: MessageType.AutoProxyRefreshResponse,
+      status,
+    }));
   }
 }

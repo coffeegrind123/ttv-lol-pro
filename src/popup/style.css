@@ -83,6 +83,14 @@ a:visited:hover {
   color: var(--link-hover);
 }
 
+/* Automatic proxies */
+
+.auto-proxies-summary {
+  margin: 6px 3px 0 3px;
+  color: var(--idle-color);
+  font-size: 8.5pt;
+}
+
 /* Warning banner */
 
 .warning-banner {

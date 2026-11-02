@@ -4,6 +4,15 @@ import onStartupStoreCleanup from "../background/handlers/onStartupStoreCleanup"
 import $ from "../common/ts/$";
 import $$ from "../common/ts/$$";
 import { sendAdLog } from "../common/ts/adLog";
+import {
+  AD_FREE_COUNTRIES,
+  MAX_AUTO_PROXY_POOL_SIZE,
+  MIN_AUTO_PROXY_POOL_SIZE,
+  PARTIALLY_AD_FREE_COUNTRIES,
+  QUALITY_LIMITED_COUNTRIES,
+  getDefaultAutoProxyCountries,
+} from "../common/ts/autoProxy/constants";
+import { alpha2 } from "../common/ts/countryCodes";
 import { readFile, saveFile } from "../common/ts/file";
 import findChannelFromTwitchTvUrl from "../common/ts/findChannelFromTwitchTvUrl";
 import isChannelWhitelisted from "../common/ts/isChannelWhitelisted";
@@ -19,7 +28,9 @@ import store from "../store";
 import getDefaultState from "../store/getDefaultState";
 import type { State } from "../store/types";
 import {
+  AutoProxyRefreshReason,
   KeyOfType,
+  MessageType,
   PassportConfig,
   ProxyRequestType,
   UserExperienceMode,
@@ -102,6 +113,36 @@ const whitelistedChannelsListElement = $(
 const whitelistSubscriptionsCheckboxElement = $(
   "#whitelist-subscriptions-checkbox"
 ) as HTMLInputElement;
+// Automatic proxies
+const autoProxiesEnabledCheckboxElement = $(
+  "#auto-proxies-enabled-checkbox"
+) as HTMLInputElement;
+const autoProxiesStatusElement = $("#auto-proxies-status") as HTMLDivElement;
+const autoProxiesStatusTextElement = $(
+  "#auto-proxies-status-text"
+) as HTMLSpanElement;
+const autoProxiesRefreshButtonElement = $(
+  "#auto-proxies-refresh-button"
+) as HTMLButtonElement;
+const autoProxiesTableElement = $("#auto-proxies-table") as HTMLTableElement;
+const autoProxiesTableBodyElement = $(
+  "#auto-proxies-table-body"
+) as HTMLTableSectionElement;
+const autoProxiesCountriesAdFreeElement = $(
+  "#auto-proxies-countries-ad-free"
+) as HTMLDivElement;
+const autoProxiesCountriesPartialElement = $(
+  "#auto-proxies-countries-partial"
+) as HTMLDivElement;
+const autoProxiesCountriesResetButtonElement = $(
+  "#auto-proxies-countries-reset-button"
+) as HTMLButtonElement;
+const autoProxiesPoolSizeInputElement = $(
+  "#auto-proxies-pool-size-input"
+) as HTMLInputElement;
+const autoProxiesSourcesListElement = $(
+  "#auto-proxies-sources-list"
+) as HTMLOListElement;
 // Proxies
 const optimizedProxiesInputElement = $("#optimized") as HTMLInputElement;
 const optimizedProxiesListElement = $(
@@ -199,6 +240,57 @@ function main() {
     if (!checked) {
       // Clear active channel subscriptions to free up storage space.
       store.state.activeChannelSubscriptions = [];
+    }
+  });
+  // Automatic proxies
+  autoProxiesEnabledCheckboxElement.addEventListener("change", () => {
+    store.state.autoProxiesEnabled = autoProxiesEnabledCheckboxElement.checked;
+    if (isChromium && store.state.chromiumProxyActive) {
+      updateProxySettings();
+    }
+    if (store.state.autoProxiesEnabled) requestAutoProxyRefresh("settings");
+    updateAutoProxiesUI();
+  });
+  autoProxiesRefreshButtonElement.addEventListener("click", () =>
+    requestAutoProxyRefresh("manual")
+  );
+  autoProxiesCountriesResetButtonElement.addEventListener("click", () => {
+    setAutoProxyCountries(getDefaultAutoProxyCountries());
+  });
+  autoProxiesPoolSizeInputElement.addEventListener("change", () => {
+    const value = Math.round(Number(autoProxiesPoolSizeInputElement.value));
+    if (!Number.isFinite(value)) return updateAutoProxiesUI();
+    store.state.autoProxyPoolSize = Math.min(
+      MAX_AUTO_PROXY_POOL_SIZE,
+      Math.max(MIN_AUTO_PROXY_POOL_SIZE, value)
+    );
+    if (store.state.autoProxies.length > store.state.autoProxyPoolSize) {
+      store.state.autoProxies = store.state.autoProxies.slice(
+        0,
+        store.state.autoProxyPoolSize
+      );
+      if (isChromium && store.state.chromiumProxyActive) {
+        updateProxySettings();
+      }
+    }
+    requestAutoProxyRefresh("settings");
+    updateAutoProxiesUI();
+  });
+  autoProxiesTableBodyElement.addEventListener("click", event => {
+    const button = (event.target as HTMLElement).closest(
+      "button[data-proxy-url]"
+    ) as HTMLButtonElement | null;
+    if (!button) return;
+    removeAutoProxy(button.dataset.proxyUrl!);
+  });
+  store.addEventListener("change", (changes: Record<string, unknown>) => {
+    const keys = Object.keys(changes);
+    if (
+      keys.some(key =>
+        ["autoProxies", "autoProxyStatus", "autoProxiesEnabled"].includes(key)
+      )
+    ) {
+      updateAutoProxiesUI();
     }
   });
   // Proxies
@@ -315,6 +407,19 @@ function updateUI() {
   });
   whitelistSubscriptionsCheckboxElement.checked =
     store.state.whitelistChannelSubscriptions;
+  // Automatic proxies
+  autoProxiesEnabledCheckboxElement.checked = store.state.autoProxiesEnabled;
+  autoProxiesPoolSizeInputElement.value = `${store.state.autoProxyPoolSize}`;
+  renderAutoProxyCountries();
+  listInit(autoProxiesSourcesListElement, "autoProxySourceUrls", {
+    getPromptPlaceholder: () => "Enter a proxy list URL…",
+    isAddAllowed: isAutoProxySourceUrlAllowed,
+    isEditAllowed: isAutoProxySourceUrlAllowed,
+    onChange() {
+      requestAutoProxyRefresh("settings");
+    },
+  });
+  updateAutoProxiesUI();
   // Proxies
   if (store.state.optimizedProxiesEnabled)
     optimizedProxiesInputElement.checked = true;
@@ -463,6 +568,146 @@ function loadProxiesLists() {
     insertMode: "both",
   });
 }
+
+//#region Automatic proxies
+function requestAutoProxyRefresh(reason: AutoProxyRefreshReason) {
+  autoProxiesRefreshButtonElement.disabled = true;
+  browser.runtime
+    .sendMessage({ type: MessageType.AutoProxyRefresh, reason })
+    .catch(error => {
+      console.error(error);
+      autoProxiesStatusTextElement.textContent = `Could not reach the background script: ${error}`;
+    })
+    .finally(() => {
+      autoProxiesRefreshButtonElement.disabled = false;
+      updateAutoProxiesUI();
+    });
+}
+
+function isAutoProxySourceUrlAllowed(url: string): AllowedResult {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:") {
+      return [false, "Proxy lists must be served over HTTPS"];
+    }
+  } catch {
+    return [false, `'${url}' is not a valid URL`];
+  }
+  return [true];
+}
+
+function setAutoProxyCountries(countries: string[]) {
+  store.state.autoProxyCountries = countries;
+  renderAutoProxyCountries();
+  requestAutoProxyRefresh("settings");
+}
+
+function renderAutoProxyCountries() {
+  const selected = new Set(store.state.autoProxyCountries);
+  const render = (container: HTMLElement, codes: readonly string[]) => {
+    container.innerHTML = "";
+    for (const code of codes) {
+      const id = `auto-proxies-country-${code}`;
+      const label = document.createElement("label");
+      label.htmlFor = id;
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.id = id;
+      checkbox.checked = selected.has(code);
+      checkbox.addEventListener("change", () => {
+        const next = new Set(store.state.autoProxyCountries);
+        if (checkbox.checked) next.add(code);
+        else next.delete(code);
+        setAutoProxyCountries([...next]);
+      });
+      const name = (alpha2 as Record<string, string>)[code] ?? code;
+      const limit = QUALITY_LIMITED_COUNTRIES[code];
+      const text = document.createElement("span");
+      text.textContent = limit ? `${name} (${limit})` : name;
+      label.append(checkbox, text);
+      container.append(label);
+    }
+  };
+  render(autoProxiesCountriesAdFreeElement, AD_FREE_COUNTRIES);
+  render(autoProxiesCountriesPartialElement, PARTIALLY_AD_FREE_COUNTRIES);
+}
+
+function removeAutoProxy(url: string) {
+  store.state.autoProxies = store.state.autoProxies.filter(
+    entry => entry.url !== url
+  );
+  // Keep it out of the next refreshes too.
+  store.state.autoProxyRejected = {
+    ...store.state.autoProxyRejected,
+    [url]: Date.now() + 1000 * 60 * 60 * 24,
+  };
+  if (isChromium && store.state.chromiumProxyActive) {
+    updateProxySettings();
+  }
+  requestAutoProxyRefresh("settings");
+}
+
+function formatAgo(timestamp: number): string {
+  if (!timestamp) return "never";
+  const seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+  return `${Math.round(minutes / 60)} h ago`;
+}
+
+function updateAutoProxiesUI() {
+  const { autoProxies, autoProxiesEnabled, autoProxyStatus } = store.state;
+
+  autoProxiesStatusElement.dataset.state = autoProxyStatus.state;
+  const busy =
+    autoProxyStatus.state === "fetching" || autoProxyStatus.state === "probing";
+  let text: string;
+  if (!autoProxiesEnabled) {
+    text = "Off.";
+  } else if (busy) {
+    text = `${autoProxyStatus.message} (${autoProxyStatus.tested} tested, ${autoProxyStatus.accepted} working)`;
+  } else if (autoProxyStatus.updatedAt) {
+    text = `${autoProxyStatus.message} Last refresh ${formatAgo(autoProxyStatus.updatedAt)}.`;
+  } else {
+    text = "Not run yet.";
+  }
+  autoProxiesStatusTextElement.textContent = text;
+  autoProxiesRefreshButtonElement.disabled = !autoProxiesEnabled || busy;
+
+  autoProxiesTableBodyElement.innerHTML = "";
+  autoProxiesTableElement.hidden =
+    !autoProxiesEnabled || autoProxies.length === 0;
+  for (const entry of autoProxies) {
+    const row = document.createElement("tr");
+    const countryName =
+      (alpha2 as Record<string, string>)[entry.twitchCountry] ??
+      entry.twitchCountry;
+    const cells = [
+      entry.url,
+      entry.listedCountry && entry.listedCountry !== entry.twitchCountry
+        ? `${countryName} (list said ${entry.listedCountry})`
+        : countryName,
+      `${entry.latencyMs} ms`,
+      formatAgo(entry.lastCheckedAt),
+      `${entry.strikes}`,
+    ];
+    for (const value of cells) {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      row.append(cell);
+    }
+    const actionCell = document.createElement("td");
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.textContent = "Remove";
+    removeButton.dataset.proxyUrl = entry.url;
+    actionCell.append(removeButton);
+    row.append(actionCell);
+    autoProxiesTableBodyElement.append(row);
+  }
+}
+//#endregion
 
 function isOptimizedProxyUrlAllowed(url: string): AllowedResult {
   const urlLower = url.toLowerCase();
@@ -790,6 +1035,10 @@ exportButtonElement.addEventListener("click", () => {
     adLogEnabled: store.state.adLogEnabled,
     allowOtherProxyProtocols: store.state.allowOtherProxyProtocols,
     anonymousMode: store.state.anonymousMode,
+    autoProxiesEnabled: store.state.autoProxiesEnabled,
+    autoProxyCountries: store.state.autoProxyCountries,
+    autoProxyPoolSize: store.state.autoProxyPoolSize,
+    autoProxySourceUrls: store.state.autoProxySourceUrls,
     customPassport: store.state.customPassport,
     customPassportEnabled: store.state.customPassportEnabled,
     normalProxies: store.state.normalProxies,

@@ -1,6 +1,7 @@
 import onStartupStoreCleanup from "../../background/handlers/onStartupStoreCleanup";
 import store from "../../store";
 import { ProxyRequestType, ProxyType } from "../../types";
+import getActiveProxies from "./getActiveProxies";
 import isRequestTypeProxied from "./isRequestTypeProxied";
 import { getProxyInfoFromUrl, getUrlFromProxyInfo } from "./proxyInfo";
 import {
@@ -20,12 +21,23 @@ const PROXY_TYPE_MAP: Readonly<Record<ProxyType, string>> = Object.freeze({
   socks4: "SOCKS4",
 });
 
+// Set while an automatic-proxy probe owns the PAC script (Chromium only).
+let chromiumProbeController: AbortController | null = null;
+
 export function updateProxySettings(requestFilter?: ProxyRequestType[]) {
   const { optimizedProxiesEnabled, passportLevel } = store.state;
 
-  const proxies = optimizedProxiesEnabled
-    ? store.state.optimizedProxies
-    : store.state.normalProxies;
+  // Twitch playback wins over a running probe; the probe sees the abort and
+  // discards its result.
+  if (chromiumProbeController) {
+    console.log(
+      "⚙️ Cancelling automatic proxy probe: Twitch tab needs the proxy"
+    );
+    chromiumProbeController.abort();
+    chromiumProbeController = null;
+  }
+
+  const proxies = getActiveProxies();
   const proxyInfoString = getProxyInfoStringFromUrls(proxies);
 
   const getRequestParams = (requestType: ProxyRequestType) => ({
@@ -119,9 +131,12 @@ function getProxyInfoStringFromUrls(urls: string[]): string {
 }
 
 export function clearProxySettings() {
-  chrome.proxy.settings.clear({ scope: "regular" }, function () {
-    console.log("⚙️ Proxy settings cleared");
-  });
+  // A running probe owns the PAC script and clears it when done.
+  if (!chromiumProbeController) {
+    chrome.proxy.settings.clear({ scope: "regular" }, function () {
+      console.log("⚙️ Proxy settings cleared");
+    });
+  }
   store.state.chromiumProxyActive = false;
 
   if (
@@ -129,5 +144,61 @@ export function clearProxySettings() {
     1000 * 60 * 60 * 24 * 7 // 7 days
   ) {
     onStartupStoreCleanup();
+  }
+}
+
+/**
+ * Chromium only: routes Twitch's GQL, Usher and Video Weaver hosts through
+ * `proxyUrl` alone (no DIRECT fallback, so a dead proxy fails instead of
+ * looking alive) while `probe` runs, then restores the previous state.
+ *
+ * Only runs while no Twitch tab needs the proxy. `updateProxySettings`
+ * aborts the signal passed to `probe` if one opens meanwhile.
+ */
+export async function runWithChromiumProbePac<T>(
+  proxyUrl: string,
+  probe: (signal: AbortSignal) => Promise<T>
+): Promise<T> {
+  if (store.state.chromiumProxyActive) {
+    throw new Error("Twitch tab open; probing postponed");
+  }
+  if (chromiumProbeController) {
+    throw new Error("Another probe is running");
+  }
+
+  const controller = new AbortController();
+  chromiumProbeController = controller;
+  const proxyInfoString = getProxyInfoStringFromUrls([proxyUrl])
+    .split("; ")
+    .filter(part => part !== "DIRECT")
+    .join("; ");
+  const config: chrome.proxy.ProxyConfig = {
+    mode: "pac_script",
+    pacScript: {
+      data: `
+        function FindProxyForURL(url, host) {
+          if (${twitchGqlHostRegex}.test(host) || ${usherHostRegex}.test(host) || ${videoWeaverHostRegex}.test(host)) {
+            return "${proxyInfoString}";
+          }
+          return "DIRECT";
+        }
+      `,
+    },
+  };
+
+  try {
+    await new Promise<void>(resolve =>
+      chrome.proxy.settings.set({ value: config, scope: "regular" }, resolve)
+    );
+    return await probe(controller.signal);
+  } finally {
+    if (chromiumProbeController === controller) {
+      chromiumProbeController = null;
+      if (!store.state.chromiumProxyActive) {
+        await new Promise<void>(resolve =>
+          chrome.proxy.settings.clear({ scope: "regular" }, resolve)
+        );
+      }
+    }
   }
 }

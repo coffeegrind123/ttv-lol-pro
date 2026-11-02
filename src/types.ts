@@ -98,6 +98,9 @@ export const enum MessageType {
   UpdateAdLog = "TLP_UpdateAdLog",
   ClearStats = "TLP_ClearStats",
   ExtensionError = "TLP_ExtensionError",
+  ProxiedAdDetected = "TLP_ProxiedAdDetected",
+  AutoProxyRefresh = "TLP_AutoProxyRefresh",
+  AutoProxyRefreshResponse = "TLP_AutoProxyRefreshResponse",
 }
 
 export const enum ProxyRequestType {
@@ -136,3 +139,39 @@ export type UserExperienceMode =
   | "blockAds"
   | "unlockBestQuality"
   | "expertMode";
+
+export type AutoProxyProtocol = Exclude<ProxyType, "direct" | "https">;
+
+/**
+ * A proxy picked automatically from the public proxy list and verified
+ * against Twitch from this browser.
+ */
+export interface AutoProxyEntry {
+  url: string; // `protocol://host:port`, as accepted by `getProxyInfoFromUrl`.
+  listedCountry: string; // Country according to the proxy list (GeoIP).
+  twitchCountry: string; // Country according to Twitch (`USER-COUNTRY`).
+  exitIp: string | null; // `user_ip` from the playback access token.
+  latencyMs: number; // Wall time of the full probe (token + usher + playlist).
+  addedAt: number;
+  lastCheckedAt: number;
+  strikes: number;
+}
+
+export type AutoProxyRefreshReason =
+  | "install"
+  | "startup"
+  | "alarm"
+  | "manual"
+  | "settings"
+  | "lowPool";
+
+export interface AutoProxyStatus {
+  state: "idle" | "fetching" | "probing" | "error";
+  message: string;
+  reason: AutoProxyRefreshReason | null;
+  listSize: number; // Entries in the downloaded list.
+  candidates: number; // Entries left after filtering.
+  tested: number;
+  accepted: number;
+  updatedAt: number;
+}

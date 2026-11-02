@@ -4,6 +4,7 @@ import $ from "../common/ts/$";
 import { resolveAdIdentity } from "../common/ts/adLog";
 import { alpha2 } from "../common/ts/countryCodes";
 import findChannelFromTwitchTvUrl from "../common/ts/findChannelFromTwitchTvUrl";
+import getActiveProxies from "../common/ts/getActiveProxies";
 import getHostFromUrl from "../common/ts/getHostFromUrl";
 import {
   anonymizeIpAddress,
@@ -18,6 +19,9 @@ import type { AdLogEntry, StreamStatus } from "../types";
 
 //#region HTML Elements
 const warningBannerElement = $("#warning-banner") as HTMLDivElement;
+const autoProxiesSummaryElement = $(
+  "#auto-proxies-summary"
+) as HTMLParagraphElement;
 const streamStatusElement = $("#stream-status") as HTMLDivElement;
 const proxiedElement = $("#proxied") as HTMLDivElement;
 const channelNameElement = $("#channel-name") as HTMLHeadingElement;
@@ -39,12 +43,21 @@ if (store.readyState === "complete") main();
 else store.addEventListener("load", main);
 
 async function main() {
+  if (getActiveProxies().length === 0) {
+    setWarningBanner("noProxies");
+  }
+  setAutoProxiesSummary();
+  store.addEventListener(
+    "change",
+    (changes: Record<string, Storage.StorageChange>) => {
+      if ("autoProxies" in changes || "autoProxyStatus" in changes) {
+        setAutoProxiesSummary();
+      }
+    }
+  );
   const proxies = store.state.optimizedProxiesEnabled
     ? store.state.optimizedProxies
     : store.state.normalProxies;
-  if (proxies.length === 0) {
-    setWarningBanner("noProxies");
-  }
   const proxyInfoArray = proxies.map(getProxyInfoFromUrl);
   const shouldShowCopyCredentialsButton =
     isChromium &&
@@ -69,6 +82,7 @@ async function main() {
     (changes: Record<string, Storage.StorageChange>) => {
       const changedKeys = Object.keys(changes) as (keyof State)[];
       const relevantKeys: (keyof State)[] = [
+        "autoProxies",
         "normalProxies",
         "optimizedProxies",
         "optimizedProxiesEnabled",
@@ -79,6 +93,26 @@ async function main() {
       setStreamStatusElement(channelName);
     }
   );
+}
+
+function setAutoProxiesSummary() {
+  const { autoProxies, autoProxiesEnabled, autoProxyStatus } = store.state;
+  if (!autoProxiesEnabled) {
+    autoProxiesSummaryElement.hidden = true;
+    return;
+  }
+  const busy =
+    autoProxyStatus.state === "fetching" || autoProxyStatus.state === "probing";
+  const countries = [...new Set(autoProxies.map(entry => entry.twitchCountry))];
+  let text =
+    autoProxies.length > 0
+      ? `Automatic proxies: ${autoProxies.length} working (${countries.join(", ")})`
+      : "Automatic proxies: none working yet";
+  if (busy) text += " · testing…";
+  else if (autoProxyStatus.state === "error")
+    text += ` · ${autoProxyStatus.message}`;
+  autoProxiesSummaryElement.textContent = text;
+  autoProxiesSummaryElement.hidden = false;
 }
 
 function setWarningBanner(type: "noProxies") {
@@ -130,7 +164,7 @@ function setProxyStatus(
     status.stats &&
     status.stats.proxied > 0 &&
     store.state.optimizedProxiesEnabled &&
-    store.state.optimizedProxies.length > 0 &&
+    getActiveProxies().length > 0 &&
     !isWhitelisted
   ) {
     proxiedElement.classList.remove("error");
@@ -351,6 +385,17 @@ copyDebugInfoButtonElement.addEventListener("click", async e => {
         ? `- Custom passport: ${JSON.stringify(store.state.customPassport)}\n`
         : `- Passport level: ${store.state.passportLevel}\n`,
       `- Anonymous mode: ${store.state.anonymousMode}\n`,
+      store.state.autoProxiesEnabled
+        ? `- Automatic proxies: ${JSON.stringify(
+            store.state.autoProxies.map(entry => ({
+              url: e.shiftKey
+                ? entry.url
+                : anonymizeIpAddresses([entry.url])[0],
+              twitchCountry: entry.twitchCountry,
+              strikes: entry.strikes,
+            }))
+          )} (${store.state.autoProxyStatus.state}: ${store.state.autoProxyStatus.message})\n`
+        : `- Automatic proxies: off\n`,
       store.state.optimizedProxiesEnabled
         ? `- Using optimized proxies: ${JSON.stringify(
             e.shiftKey

@@ -1,7 +1,9 @@
 import browser, { Proxy } from "webextension-polyfill";
+import { getFirefoxProbeRoute } from "../../common/ts/autoProxy/probe";
 import findChannelFromTwitchTvUrl from "../../common/ts/findChannelFromTwitchTvUrl";
 import findChannelFromUsherUrl from "../../common/ts/findChannelFromUsherUrl";
 import findChannelFromVideoWeaverUrl from "../../common/ts/findChannelFromVideoWeaverUrl";
+import getActiveProxies from "../../common/ts/getActiveProxies";
 import getHostFromUrl from "../../common/ts/getHostFromUrl";
 import isChannelWhitelisted from "../../common/ts/isChannelWhitelisted";
 import isFlaggedRequest from "../../common/ts/isFlaggedRequest";
@@ -31,6 +33,11 @@ export default async function onProxyRequest(
     });
   }
 
+  // The extension's own automatic-proxy probes carry a marker and must use
+  // exactly the proxy under test.
+  const probeRoute = getFirefoxProbeRoute(details.url);
+  if (probeRoute) return probeRoute;
+
   const host = getHostFromUrl(details.url);
   if (!host) return { type: "direct" };
 
@@ -46,9 +53,7 @@ export default async function onProxyRequest(
     return { type: "direct" };
   }
 
-  const proxies = store.state.optimizedProxiesEnabled
-    ? store.state.optimizedProxies
-    : store.state.normalProxies;
+  const proxies = getActiveProxies();
   const proxyInfoArray = getProxyInfoArrayFromUrls(proxies);
 
   const requestParams = {

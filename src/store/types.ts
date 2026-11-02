@@ -1,6 +1,8 @@
 import type { Tabs } from "webextension-polyfill";
 import type {
   AdLogEntry,
+  AutoProxyEntry,
+  AutoProxyStatus,
   DnsResponse,
   PassportConfig,
   StreamStatus,
@@ -18,6 +20,14 @@ export interface State {
   adLogLastSent: number;
   allowOtherProxyProtocols: boolean;
   anonymousMode: boolean;
+  autoProxies: AutoProxyEntry[];
+  autoProxiesEnabled: boolean;
+  autoProxyCountries: string[];
+  autoProxyLastRefresh: number;
+  autoProxyPoolSize: number;
+  autoProxyRejected: Record<string, number>;
+  autoProxySourceUrls: string[];
+  autoProxyStatus: AutoProxyStatus;
   chromiumProxyActive: boolean;
   completedSetupVersion: number;
   customPassport: PassportConfig;

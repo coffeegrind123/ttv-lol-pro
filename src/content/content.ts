@@ -86,6 +86,10 @@ function onStoreChange(changes: Record<string, Storage.StorageChange>) {
   // (Also to reduce the number of console logs.)
   const ignoredKeys: (keyof State)[] = [
     "adLog",
+    "autoProxies",
+    "autoProxyLastRefresh",
+    "autoProxyRejected",
+    "autoProxyStatus",
     "dnsResponses",
     "openedTwitchTabs",
     "streamStatuses",
@@ -136,6 +140,7 @@ async function onPageMessage(event: MessageEvent) {
       MessageType.EnableFullMode,
       MessageType.DisableFullMode,
       MessageType.UsherResponse,
+      MessageType.ProxiedAdDetected,
     ].includes(message.type)
   ) {
     // Forward to background script.

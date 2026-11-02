@@ -1,3 +1,8 @@
+import {
+  DEFAULT_AUTO_PROXY_POOL_SIZE,
+  DEFAULT_AUTO_PROXY_SOURCE_URLS,
+  getDefaultAutoProxyCountries,
+} from "../common/ts/autoProxy/constants";
 import isChromium from "../common/ts/isChromium";
 import type { State } from "./types";
 
@@ -9,6 +14,23 @@ export default function getDefaultState() {
     adLogLastSent: 0,
     allowOtherProxyProtocols: false,
     anonymousMode: true,
+    autoProxies: [],
+    autoProxiesEnabled: true,
+    autoProxyCountries: getDefaultAutoProxyCountries(),
+    autoProxyLastRefresh: 0,
+    autoProxyPoolSize: DEFAULT_AUTO_PROXY_POOL_SIZE,
+    autoProxyRejected: {},
+    autoProxySourceUrls: [...DEFAULT_AUTO_PROXY_SOURCE_URLS],
+    autoProxyStatus: {
+      state: "idle",
+      message: "",
+      reason: null,
+      listSize: 0,
+      candidates: 0,
+      tested: 0,
+      accepted: 0,
+      updatedAt: 0,
+    },
     chromiumProxyActive: false,
     completedSetupVersion: 0,
     customPassport: {

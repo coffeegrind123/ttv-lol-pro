@@ -292,6 +292,113 @@
           </ul>
         </section>
 
+        <!-- Automatic proxies -->
+        <section id="auto-proxies" class="section">
+          <h2>Automatic proxies</h2>
+          <small>
+            Picks free public proxies in countries where Twitch shows no ads,
+            tests each one against Twitch from your browser, and uses the ones
+            that work ahead of the proxies listed under "Proxies" below. Proxies
+            that let ads through are replaced automatically.
+          </small>
+          <br />
+          <small>
+            Proxy list:
+            <a
+              href="https://github.com/maximilianfeix/proxy-scraper"
+              target="_blank"
+              >proxy-scraper</a
+            >
+            (rebuilt hourly). Country list: TTV LOL PRO knowledge base, "List of
+            known ad-free countries".
+          </small>
+          <br /><br />
+          <ul class="options-list">
+            <li>
+              <input
+                type="checkbox"
+                name="auto-proxies-enabled-checkbox"
+                id="auto-proxies-enabled-checkbox"
+              />
+              <label for="auto-proxies-enabled-checkbox">
+                Find and use proxies automatically
+              </label>
+            </li>
+          </ul>
+          <div id="auto-proxies-status" class="auto-proxies-status">
+            <span id="auto-proxies-status-text"></span>
+            <button type="button" id="auto-proxies-refresh-button">
+              Refresh now
+            </button>
+          </div>
+          <table id="auto-proxies-table" class="auto-proxies-table">
+            <thead>
+              <tr>
+                <th>Proxy</th>
+                <th>Country (Twitch)</th>
+                <th>Latency</th>
+                <th>Last check</th>
+                <th>Strikes</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="auto-proxies-table-body"></tbody>
+          </table>
+          <details class="auto-proxies-details">
+            <summary>Countries</summary>
+            <small>
+              Twitch decides by the proxy's exit country. Ad-free: no ads
+              recorded in the last 12 months. Partially ad-free: 1-2 ads
+              recorded in the last 12 months.
+            </small>
+            <h3>Ad-free</h3>
+            <div
+              id="auto-proxies-countries-ad-free"
+              class="auto-proxies-countries"
+            ></div>
+            <h3>Partially ad-free</h3>
+            <div
+              id="auto-proxies-countries-partial"
+              class="auto-proxies-countries"
+            ></div>
+            <button type="button" id="auto-proxies-countries-reset-button">
+              Reset to ad-free countries
+            </button>
+          </details>
+          <details class="auto-proxies-details">
+            <summary>Advanced</summary>
+            <ul class="options-list">
+              <li>
+                <label for="auto-proxies-pool-size-input">
+                  Proxies to keep ready
+                </label>
+                <input
+                  type="number"
+                  id="auto-proxies-pool-size-input"
+                  min="1"
+                  max="20"
+                  step="1"
+                />
+              </li>
+            </ul>
+            <small>
+              Proxy lists, tried in order. JSON in proxy-scraper's
+              <code>proxies.json</code> format, or text with one
+              <code>protocol://host:port</code> per line.
+            </small>
+            <ol
+              id="auto-proxies-sources-list"
+              class="store-list"
+              start="0"
+            ></ol>
+          </details>
+          <small>
+            Free proxies are run by strangers. Twitch traffic stays encrypted
+            end to end, so a proxy sees which Twitch servers you connect to, not
+            what you watch or your login.
+          </small>
+        </section>
+
         <!-- Proxies -->
         <section id="proxies" class="section">
           <h2>Proxies</h2>
