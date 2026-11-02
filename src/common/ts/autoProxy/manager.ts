@@ -27,7 +27,7 @@ import {
   type ProbeResult,
 } from "./probe";
 import {
-  fetchProxyList,
+  fetchProxyLists,
   selectCandidates,
   type ProxyCandidate,
 } from "./source";
@@ -284,7 +284,7 @@ async function runRefresh(
     // 2. Top up from the list.
     if (pool.length < poolSize) {
       setStatus({ state: "fetching", message: "Downloading proxy list…" });
-      const list = await fetchProxyList(store.state.autoProxySourceUrls);
+      const list = await fetchProxyLists(store.state.autoProxySourceUrls);
       const inPool = new Set(pool.map(entry => entry.url));
       const candidates = selectCandidates(
         list.candidates,

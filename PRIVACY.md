@@ -14,7 +14,7 @@ Users who opt to use third-party proxies should be aware that these services ope
 
 ## Automatic Proxies
 
-When automatic proxies are enabled (the default in "Block Ads" mode), TTV LOL PRO downloads a public proxy list from proxy-scraper (`proxy-scraper.de`, with `cdn.jsdelivr.net` as a fallback) whenever it needs more working proxies, rechecks the proxies it uses every 30 minutes, and sends test requests to Twitch through the proxies on it. These proxies are run by unknown third parties. As with any proxy, they can see your IP address and the Twitch domain names requested through them, but not the encrypted content. No data about you is sent to the list's host beyond the download request itself. Automatic proxies can be turned off in the options.
+When automatic proxies are enabled (the default in "Block Ads" mode), TTV LOL PRO downloads a public proxy list from proxy-scraper (`raw.githubusercontent.com` and `proxy-scraper.de`) whenever it needs more working proxies, rechecks the proxies it uses every 30 minutes, and sends test requests to Twitch through the proxies on it. These proxies are run by unknown third parties. As with any proxy, they can see your IP address and the Twitch domain names requested through them, but not the encrypted content. No data about you is sent to the list's host beyond the download request itself. Automatic proxies can be turned off in the options.
 
 ## Local Ad-Bypass Logging
 

@@ -54,14 +54,17 @@ export function getDefaultAutoProxyCountries(): string[] {
 
 /**
  * Proxy lists produced by proxy-scraper (https://github.com/maximilianfeix/proxy-scraper),
- * tried in order until one downloads and parses.
+ * downloaded together and merged (see `fetchProxyLists`). Both are rebuilt
+ * about every hour and send `Access-Control-Allow-Origin: *`.
  *
- * `proxies.json` is rebuilt about every hour, served from GitHub Pages behind
- * a CDN, and sends `Access-Control-Allow-Origin: *`.
+ * 1. `twitch.json`: the hourly list re-checked against Twitch's stream CDN,
+ *    with the country Twitch reports (`twitch_country`). Small (~30-40
+ *    proxies), but most of it passes our own probe.
+ * 2. `proxies.json`: the full hourly list with GeoIP countries, as fallback.
  */
 export const DEFAULT_AUTO_PROXY_SOURCE_URLS: readonly string[] = Object.freeze([
+  "https://raw.githubusercontent.com/coffeegrind123/proxy-scraper/twitch-list/twitch.json",
   "https://proxy-scraper.de/proxies.json",
-  "https://cdn.jsdelivr.net/gh/maximilianfeix/proxy-scraper@proxy-list/proxies.json",
 ]);
 
 export const DEFAULT_AUTO_PROXY_POOL_SIZE = 5;

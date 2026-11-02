@@ -108,7 +108,7 @@ Any questions? Please read the [wiki](https://wiki.ttvlolpro.com/) first.
 
 The "Block Ads" mode needs no setup: the extension finds proxies by itself.
 
-1. On install, at browser start and every 30 minutes it rechecks the proxies it uses, and when fewer than it needs still work, downloads the hourly public proxy list from [proxy-scraper](https://github.com/maximilianfeix/proxy-scraper) (`proxy-scraper.de/proxies.json`).
+1. On install, at browser start and every 30 minutes it rechecks the proxies it uses, and when fewer than it needs still work, downloads two hourly public proxy lists from [proxy-scraper](https://github.com/maximilianfeix/proxy-scraper): a Twitch-checked list with the country Twitch reports for each proxy ([`twitch-list`](https://github.com/coffeegrind123/proxy-scraper/tree/twitch-list)), and the full list (`proxy-scraper.de/proxies.json`) as fallback.
 2. It keeps HTTPS-capable proxies in countries where Twitch shows no ads. The list is the [TTV LOL PRO knowledge base's](https://wiki.cdn-perfprod.com/guides/proxy/host-your-own-proxy) "known ad-free countries"; partially ad-free countries can be added in the options.
 3. It tests each one against Twitch from your browser, through the proxy itself: playback token, stream manifest, media playlist. A proxy is kept only if it answers, gets past Twitch's CDN (which turns most public proxies away), and Twitch itself places it in a selected country (`USER-COUNTRY`), whatever the list claimed.
 4. The working ones are tried first, ahead of the proxies in the "Proxies" list, which stay as the fallback.

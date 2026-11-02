@@ -39,23 +39,60 @@ const FETCH_TIMEOUT_MS = 20000;
 const MAX_LIST_BYTES = 16 * 1024 * 1024;
 
 /**
- * Downloads the first list that works. Throws with every source's failure
- * reason when none does.
+ * Downloads every list and merges them. A proxy listed with a
+ * Twitch-observed country beats the same proxy listed with a GeoIP one, so
+ * a small Twitch-checked list goes first and a big general list fills up
+ * behind it. Throws with every failure reason only if no list loads.
  */
-export async function fetchProxyList(
+export async function fetchProxyLists(
   sourceUrls: string[]
 ): Promise<ProxyListResult> {
+  const results = await Promise.allSettled(sourceUrls.map(fetchOne));
+  const loaded: ProxyListResult[] = [];
   const failures: string[] = [];
-  for (const sourceUrl of sourceUrls) {
-    try {
-      return await fetchOne(sourceUrl);
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : `${error}`;
-      console.warn(`[AutoProxy] List ${sourceUrl} failed: ${reason}`);
-      failures.push(`${sourceUrl}: ${reason}`);
+  results.forEach((result, index) => {
+    if (result.status === "fulfilled") {
+      loaded.push(result.value);
+      return;
+    }
+    const reason =
+      result.reason instanceof Error
+        ? result.reason.message
+        : `${result.reason}`;
+    console.warn(`[AutoProxy] List ${sourceUrls[index]} failed: ${reason}`);
+    failures.push(`${sourceUrls[index]}: ${reason}`);
+  });
+  if (loaded.length === 0) {
+    throw new Error(`No proxy list could be loaded (${failures.join("; ")})`);
+  }
+  return mergeProxyLists(loaded);
+}
+
+const COUNTRY_SOURCE_RANK = { twitch: 0, geoip: 1, unknown: 2 } as const;
+
+export function mergeProxyLists(lists: ProxyListResult[]): ProxyListResult {
+  const byUrl = new Map<string, ProxyCandidate>();
+  for (const list of lists) {
+    for (const candidate of list.candidates) {
+      const existing = byUrl.get(candidate.url);
+      if (
+        !existing ||
+        COUNTRY_SOURCE_RANK[candidate.countrySource] <
+          COUNTRY_SOURCE_RANK[existing.countrySource]
+      ) {
+        byUrl.set(candidate.url, candidate);
+      }
     }
   }
-  throw new Error(`No proxy list could be loaded (${failures.join("; ")})`);
+  return {
+    sourceUrl: lists.map(list => list.sourceUrl).join(", "),
+    candidates: [...byUrl.values()],
+    listSize: lists.reduce((sum, list) => sum + list.listSize, 0),
+    skippedMalformed: lists.reduce(
+      (sum, list) => sum + list.skippedMalformed,
+      0
+    ),
+  };
 }
 
 async function fetchOne(sourceUrl: string): Promise<ProxyListResult> {
@@ -248,7 +285,6 @@ export function selectCandidates(
   exclude: (url: string) => boolean
 ): ProxyCandidate[] {
   const allowed = new Set(countries);
-  const sourceRank = { twitch: 0, geoip: 1, unknown: 2 } as const;
 
   return candidates
     .filter(candidate => candidate.httpsCapable !== false)
@@ -256,7 +292,8 @@ export function selectCandidates(
     .filter(candidate => !exclude(candidate.url))
     .sort(
       (a, b) =>
-        sourceRank[a.countrySource] - sourceRank[b.countrySource] ||
+        COUNTRY_SOURCE_RANK[a.countrySource] -
+          COUNTRY_SOURCE_RANK[b.countrySource] ||
         (b.uptime24h ?? 0) - (a.uptime24h ?? 0) ||
         (a.latencyMs ?? Infinity) - (b.latencyMs ?? Infinity)
     );
