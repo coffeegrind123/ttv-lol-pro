@@ -1,6 +1,7 @@
 import { Mutex } from "async-mutex";
 import type { State } from "../store/types";
 import { MessageType, ProxyRequestType } from "../types";
+import type { BackupStream, StreamVariant } from "./backupStreams";
 
 export type SendMessageFn = (message: any) => void;
 export type SendMessageAndWaitForResponseFn = (
@@ -31,6 +32,9 @@ export interface UsherManifest {
   replacementMap: Map<string, string> | null; // Same as above, but with new URLs.
   consecutiveAdResponses: number; // Used to avoid infinite loops.
   consecutiveAdCooldown: number; // Used to avoid infinite loops.
+  assignedVariants: StreamVariant[]; // Codec, resolution and frame rate of each assigned URL.
+  backupIndex: number; // Next backup stream to try during the current ad break.
+  backupStream: BackupStream | null; // Backup stream `replacementMap` points to, if any.
   deleted: boolean; // Deletion flag for cleanup.
 }
 

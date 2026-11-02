@@ -385,6 +385,7 @@ copyDebugInfoButtonElement.addEventListener("click", async e => {
         ? `- Custom passport: ${JSON.stringify(store.state.customPassport)}\n`
         : `- Passport level: ${store.state.passportLevel}\n`,
       `- Anonymous mode: ${store.state.anonymousMode}\n`,
+      `- Backup streams: ${store.state.backupStreamsEnabled} (360p: ${store.state.backupStreamsAllowLowQuality}), display ads declined: ${store.state.declineDisplayAds}\n`,
       store.state.autoProxiesEnabled
         ? `- Automatic proxies: ${JSON.stringify(
             store.state.autoProxies.map(entry => ({

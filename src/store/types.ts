@@ -2,6 +2,7 @@ import type { Tabs } from "webextension-polyfill";
 import type {
   AdLogEntry,
   AutoProxyEntry,
+  AutoProxyFailure,
   AutoProxyStatus,
   DnsResponse,
   PassportConfig,
@@ -25,13 +26,17 @@ export interface State {
   autoProxyCountries: string[];
   autoProxyLastRefresh: number;
   autoProxyPoolSize: number;
+  autoProxyRecentFailures: AutoProxyFailure[];
   autoProxyRejected: Record<string, number>;
   autoProxySourceUrls: string[];
   autoProxyStatus: AutoProxyStatus;
+  backupStreamsAllowLowQuality: boolean;
+  backupStreamsEnabled: boolean;
   chromiumProxyActive: boolean;
   completedSetupVersion: number;
   customPassport: PassportConfig;
   customPassportEnabled: boolean;
+  declineDisplayAds: boolean;
   dnsResponses: DnsResponse[];
   lastStoreCleanupTimestamp: number;
   normalProxies: string[];

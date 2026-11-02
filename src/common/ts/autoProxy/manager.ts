@@ -3,6 +3,8 @@ import browser from "webextension-polyfill";
 import store from "../../../store";
 import type {
   AutoProxyEntry,
+  AutoProxyFailure,
+  AutoProxyFailureKind,
   AutoProxyRefreshReason,
   AutoProxyStatus,
 } from "../../../types";
@@ -12,10 +14,13 @@ import { updateProxySettings } from "../proxySettings";
 import {
   AUTO_PROXY_LOW_WATERMARK,
   AUTO_PROXY_MAX_PROBES_PER_REFRESH,
+  AUTO_PROXY_MAX_RECENT_FAILURES,
   AUTO_PROXY_MAX_STRIKES,
+  AUTO_PROXY_NETWORK_SUSPECT_MIN,
   AUTO_PROXY_PROBE_CONCURRENCY_FIREFOX,
   AUTO_PROXY_REFRESH_PERIOD_MINUTES,
   AUTO_PROXY_REJECT_COOLDOWN_MS,
+  AUTO_PROXY_SHORT_REJECT_COOLDOWN_MS,
   MAX_AUTO_PROXY_POOL_SIZE,
   MIN_AUTO_PROXY_POOL_SIZE,
 } from "./constants";
@@ -78,14 +83,81 @@ function isRejected(url: string, now = Date.now()): boolean {
   return until != null && until > now;
 }
 
-function reject(url: string, why: string) {
+const LONG_COOLDOWN_KINDS: ReadonlySet<AutoProxyFailureKind> = new Set([
+  "cdn",
+  "country",
+  "leak",
+  "ads",
+]);
+
+const FAILURE_LABELS: Readonly<Record<AutoProxyFailureKind, string>> =
+  Object.freeze({
+    cdn: "blocked by Twitch's CDN",
+    country: "outside the selected countries",
+    leak: "bypassed",
+    twitch: "refused by Twitch",
+    unreachable: "unreachable",
+    playlist: "couldn't load the stream",
+    ads: "let ads through",
+  });
+
+function reject(url: string, why: string, kind: AutoProxyFailureKind) {
+  const cooldown = LONG_COOLDOWN_KINDS.has(kind)
+    ? AUTO_PROXY_REJECT_COOLDOWN_MS
+    : AUTO_PROXY_SHORT_REJECT_COOLDOWN_MS;
   store.state.autoProxyRejected = {
     ...store.state.autoProxyRejected,
-    [url]: Date.now() + AUTO_PROXY_REJECT_COOLDOWN_MS,
+    [url]: Date.now() + cooldown,
   };
-  log(
-    `Excluding ${url} for ${AUTO_PROXY_REJECT_COOLDOWN_MS / 3600000}h: ${why}`
-  );
+  log(`Excluding ${url} for ${cooldown / 3600000}h (${kind}): ${why}`);
+}
+
+function unreject(urls: string[]) {
+  const rejected = { ...store.state.autoProxyRejected };
+  for (const url of urls) delete rejected[url];
+  store.state.autoProxyRejected = rejected;
+}
+
+function classifyFailure(
+  result: Exclude<ProbeResult, { ok: true }>
+): AutoProxyFailureKind {
+  switch (result.stage) {
+    case "country":
+      return result.twitchCountry ? "country" : "twitch";
+    case "leak":
+      return "leak";
+    case "weaver":
+      return "playlist";
+    case "usher":
+      if (/CDN/.test(result.reason)) return "cdn";
+      return /^HTTP \d/.test(result.reason) ? "twitch" : "unreachable";
+    case "token":
+      return /^GQL (HTTP|returned)/.test(result.reason)
+        ? "twitch"
+        : "unreachable";
+  }
+}
+
+/**
+ * "0 of 22 worked: 12 blocked by Twitch's CDN, 8 unreachable, 2 outside the
+ * selected countries."
+ */
+function summarizeFailures(failures: AutoProxyFailure[]): string {
+  const counts = new Map<AutoProxyFailureKind, number>();
+  for (const failure of failures) {
+    counts.set(failure.kind, (counts.get(failure.kind) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([kind, count]) => `${count} ${FAILURE_LABELS[kind]}`)
+    .join(", ");
+}
+
+function recordFailures(failures: AutoProxyFailure[]) {
+  store.state.autoProxyRecentFailures = [
+    ...failures,
+    ...store.state.autoProxyRecentFailures,
+  ].slice(0, AUTO_PROXY_MAX_RECENT_FAILURES);
 }
 
 function pruneRejected() {
@@ -195,6 +267,7 @@ async function runRefresh(
   const countries = new Set(store.state.autoProxyCountries);
   const poolSize = getPoolSize();
   let tested = 0;
+  const failures: AutoProxyFailure[] = [];
 
   try {
     pruneRejected();
@@ -276,7 +349,14 @@ async function runRefresh(
         ];
       }
       if (result.inconclusive) return [entry];
-      reject(entry.url, `recheck failed (${describeFailure(result)})`);
+      const kind = classifyFailure(result);
+      failures.push({
+        url: entry.url,
+        kind,
+        reason: `recheck: ${describeFailure(result)}`,
+        at: Date.now(),
+      });
+      reject(entry.url, `recheck failed (${describeFailure(result)})`, kind);
       return [];
     });
     savePool(pool);
@@ -332,7 +412,14 @@ async function runRefresh(
               if (isChromium) postponed = true;
               return;
             }
-            reject(candidate.url, describeFailure(result));
+            const kind = classifyFailure(result);
+            failures.push({
+              url: candidate.url,
+              kind,
+              reason: describeFailure(result),
+              at: Date.now(),
+            });
+            reject(candidate.url, describeFailure(result), kind);
             return;
           }
           if (pool.length >= poolSize) return;
@@ -374,15 +461,30 @@ async function runRefresh(
     const countriesInPool = [
       ...new Set(pool.map(entry => entry.twitchCountry)),
     ].join(", ");
-    setStatus({
-      state: "idle",
-      message:
-        pool.length === 0
-          ? "No working proxy in the selected countries right now. Will retry automatically."
-          : `${pool.length} working ${pool.length === 1 ? "proxy" : "proxies"} (${countriesInPool}).`,
-      tested,
-      accepted: pool.length,
-    });
+
+    // Every proxy unreachable and none working: more likely this network
+    // (firewall, antivirus, ISP) than all the proxies, so don't bench them.
+    const networkSuspect =
+      pool.length === 0 &&
+      failures.length >= AUTO_PROXY_NETWORK_SUSPECT_MIN &&
+      failures.every(failure => failure.kind === "unreachable");
+    if (networkSuspect) {
+      unreject(failures.map(failure => failure.url));
+    }
+    recordFailures(failures);
+
+    const breakdown = failures.length
+      ? ` Rejected ${failures.length}: ${summarizeFailures(failures)}.`
+      : "";
+    let message: string;
+    if (networkSuspect) {
+      message = `None of the ${failures.length} proxies tested could be reached from this network. A firewall, antivirus or your ISP may block proxy connections. Will retry automatically.`;
+    } else if (pool.length === 0) {
+      message = `No working proxy in the selected countries right now.${breakdown} Will retry automatically.`;
+    } else {
+      message = `${pool.length} working ${pool.length === 1 ? "proxy" : "proxies"} (${countriesInPool}).${breakdown}`;
+    }
+    setStatus({ state: "idle", message, tested, accepted: pool.length });
     log(store.state.autoProxyStatus.message);
   } catch (error) {
     const message = error instanceof Error ? error.message : `${error}`;
@@ -424,7 +526,18 @@ export function strikeAutoProxy(
 
   if (immediate || strikes >= AUTO_PROXY_MAX_STRIKES) {
     pool.splice(index, 1);
-    reject(entry.url, `${why} (strike ${strikes})`);
+    const kind: AutoProxyFailureKind = /country|placed/i.test(why)
+      ? "country"
+      : "ads";
+    reject(entry.url, `${why} (strike ${strikes})`, kind);
+    recordFailures([
+      {
+        url: entry.url,
+        kind,
+        reason: `${why} (strike ${strikes})`,
+        at: Date.now(),
+      },
+    ]);
   } else {
     pool[index] = { ...entry, strikes };
     log(`Strike ${strikes}/${AUTO_PROXY_MAX_STRIKES} for ${entry.url}: ${why}`);

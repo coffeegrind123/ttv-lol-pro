@@ -157,6 +157,33 @@ export interface AutoProxyEntry {
   strikes: number;
 }
 
+/**
+ * Why a probe rejected a proxy, grouped by what it says about the proxy:
+ * - "cdn": Twitch's stream CDN turned it away (a property of its IP);
+ * - "country": Twitch places it outside the selected countries;
+ * - "leak": the request bypassed it;
+ * - "twitch": it connected but Twitch answered with an error;
+ * - "unreachable": no connection or a timeout (could be the proxy or the
+ *   user's network);
+ * - "playlist": the media playlist didn't load through it;
+ * - "ads": real playback through it carried ads (a strike, not a probe).
+ */
+export type AutoProxyFailureKind =
+  | "cdn"
+  | "country"
+  | "leak"
+  | "twitch"
+  | "unreachable"
+  | "playlist"
+  | "ads";
+
+export interface AutoProxyFailure {
+  url: string;
+  kind: AutoProxyFailureKind;
+  reason: string;
+  at: number;
+}
+
 export type AutoProxyRefreshReason =
   | "install"
   | "startup"

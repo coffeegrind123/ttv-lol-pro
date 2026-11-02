@@ -88,6 +88,7 @@ function onStoreChange(changes: Record<string, Storage.StorageChange>) {
     "adLog",
     "autoProxies",
     "autoProxyLastRefresh",
+    "autoProxyRecentFailures",
     "autoProxyRejected",
     "autoProxyStatus",
     "dnsResponses",

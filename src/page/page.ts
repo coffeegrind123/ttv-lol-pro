@@ -3,6 +3,7 @@ import findChannelFromTwitchTvUrl from "../common/ts/findChannelFromTwitchTvUrl"
 import Logger from "../common/ts/Logger";
 import toAbsoluteUrl from "../common/ts/toAbsoluteUrl";
 import { MessageType, ProxyRequestType } from "../types";
+import startDecliningDisplayAds from "./declineDisplayAds";
 import getFetch from "./getFetch";
 import getWorker from "./getWorker";
 import {
@@ -187,6 +188,8 @@ async function main(params: any) {
     type: MessageType.GetStoreState,
     from: pageState.scope,
   });
+
+  startDecliningDisplayAds(pageState);
 
   function onChannelChange(
     callback: (channelName: string, oldChannelName: string | null) => void

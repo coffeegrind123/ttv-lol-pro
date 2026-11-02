@@ -81,8 +81,25 @@ export const AUTO_PROXY_REFRESH_PERIOD_MINUTES = 30;
 /** Strikes after which an active proxy is dropped from the pool. */
 export const AUTO_PROXY_MAX_STRIKES = 2;
 
-/** How long a proxy that failed a probe or was dropped stays excluded. */
+/**
+ * How long a proxy that failed a probe or was dropped stays excluded. Long
+ * for failures that are a property of the proxy's IP (Twitch's CDN blocks
+ * it, Twitch places it elsewhere, ads came through), short for ones that may
+ * be transient or caused by the user's own network.
+ */
 export const AUTO_PROXY_REJECT_COOLDOWN_MS = 1000 * 60 * 60 * 6; // 6 hours
+export const AUTO_PROXY_SHORT_REJECT_COOLDOWN_MS = 1000 * 60 * 60; // 1 hour
+
+/**
+ * When a refresh tests at least this many proxies, accepts none, and every
+ * one of them was unreachable, the user's network is the likelier cause
+ * (a firewall, antivirus or ISP blocking proxy ports), so none of them is
+ * put on cooldown.
+ */
+export const AUTO_PROXY_NETWORK_SUSPECT_MIN = 3;
+
+/** Failures kept for the options page (latest refresh, plus strikes). */
+export const AUTO_PROXY_MAX_RECENT_FAILURES = 60;
 
 /** Probe limits. */
 export const AUTO_PROXY_PROBE_STEP_TIMEOUT_MS = 8000;

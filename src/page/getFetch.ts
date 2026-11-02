@@ -14,6 +14,13 @@ import {
   videoWeaverHostRegex,
 } from "../common/ts/regexes";
 import { MessageType, ProxyRequestType } from "../types";
+import {
+  buildBackupReplacementMap,
+  getBackupStreams,
+  mediaPlaylistHasAd,
+  parseMasterPlaylist,
+  type BackupStream,
+} from "./backupStreams";
 import type { PageState, PlaybackAccessToken, UsherManifest } from "./types";
 
 const NATIVE_FETCH = self.fetch;
@@ -45,13 +52,18 @@ export default function getFetch(pageState: PageState): typeof fetch {
       switch (message.type) {
         case MessageType.NewPlaybackAccessToken:
           await waitForStore(pageState);
-          const newPlaybackAccessToken =
-            await fetchReplacementPlaybackAccessToken(
-              pageState,
-              cachedPlaybackTokenRequestHeaders,
-              cachedPlaybackTokenRequestBody,
-              message.isFlaggedRequestOverride
-            );
+          const newPlaybackAccessToken = message.backupStream
+            ? await fetchBackupPlaybackAccessToken(
+                pageState,
+                cachedPlaybackTokenRequestHeaders,
+                message.backupStream as BackupStream
+              )
+            : await fetchReplacementPlaybackAccessToken(
+                pageState,
+                cachedPlaybackTokenRequestHeaders,
+                cachedPlaybackTokenRequestBody,
+                message.isFlaggedRequestOverride
+              );
           pageState.sendMessageToWorkerScripts({
             type: MessageType.NewPlaybackAccessTokenResponse,
             newPlaybackAccessToken,
@@ -693,6 +705,9 @@ export default function getFetch(pageState: PageState): typeof fetch {
           replacementMap: null,
           consecutiveAdResponses: 0,
           consecutiveAdCooldown: 0,
+          assignedVariants: parseMasterPlaylist(responseBody),
+          backupIndex: 0,
+          backupStream: null,
           deleted: false,
         });
       } else {
@@ -740,24 +755,64 @@ export default function getFetch(pageState: PageState): typeof fetch {
         logger.log("Ad detected.");
         // The background knows whether this response came through an
         // automatic proxy and drops proxies that let ads through.
+        // `request.url`, not `url`: a replaced request went to the
+        // replacement URL, which is what the background saw proxied.
         pageState.sendMessageToContentScript({
           type: MessageType.ProxiedAdDetected,
-          videoWeaverUrl: url,
+          videoWeaverUrl: request.url,
         });
       }
       await waitForStore(pageState);
 
       //#region Ad replacement.
+      const backupStreamsEnabled =
+        pageState.state?.backupStreamsEnabled !== false;
       if (
         pageState.state?.userExperienceMode !== "unlockBestQuality" &&
-        pageState.state?.optimizedProxiesEnabled === true &&
+        (pageState.state?.optimizedProxiesEnabled === true ||
+          backupStreamsEnabled) &&
         !videoWeaverUrlsToNotProxy.has(url) // `url` (assigned) != `videoWeaverUrl` (replacement).
       ) {
+        // Proxy replacement first (when there's a proxy to use), then the
+        // backup streams, one per ad response, until one comes back clean.
+        const hasProxies =
+          (pageState.state?.optimizedProxies.length ?? 0) > 0 ||
+          (pageState.state?.autoProxiesEnabled === true &&
+            (pageState.state?.autoProxies.length ?? 0) > 0);
+        const tryProxyFirst =
+          pageState.state?.optimizedProxiesEnabled === true && hasProxies;
         if (responseIncludesAd) {
           manifest.consecutiveAdResponses += 1;
           manifest.consecutiveAdCooldown = 15;
+          const proxyAttemptsDone = tryProxyFirst
+            ? manifest.consecutiveAdResponses > 1
+            : true;
+          if (backupStreamsEnabled && proxyAttemptsDone) {
+            const backupStream = await switchToBackupStream(
+              pageState,
+              cachedUsherRequestUrl,
+              manifest,
+              url
+            );
+            if (backupStream != null) {
+              manifest.replacementMap!.forEach(replacementUrl =>
+                videoWeaverUrlsToNotProxy.add(replacementUrl)
+              );
+              cancelRequest();
+            }
+            if (manifest.backupIndex !== Infinity) {
+              manifest.backupIndex = Infinity; // Report once per ad break.
+              logger.error("No backup stream came back without ads.");
+              pageState.sendMessageToContentScript({
+                type: MessageType.ExtensionError,
+                errorMessage: tryProxyFirst
+                  ? "Failed to replace ad: proxied, non-proxied and backup streams all contain ads."
+                  : "Failed to replace ad: every backup stream contains ads.",
+              });
+            }
+          }
           // Avoid infinite loop by limiting ad replacement attempts.
-          if (manifest.consecutiveAdResponses <= 1) {
+          else if (manifest.consecutiveAdResponses <= 1) {
             let shouldCancelRequest = false;
             try {
               const videoWeaverUrls = await updateVideoWeaverReplacementMap(
@@ -790,7 +845,10 @@ export default function getFetch(pageState: PageState): typeof fetch {
               });
             }
             if (shouldCancelRequest) cancelRequest();
-          } else if (manifest.consecutiveAdResponses === 2) {
+          } else if (
+            !backupStreamsEnabled &&
+            manifest.consecutiveAdResponses === 2
+          ) {
             logger.error("Both proxied and non-proxied streams contain ads.");
             pageState.sendMessageToContentScript({
               type: MessageType.ExtensionError,
@@ -816,6 +874,16 @@ export default function getFetch(pageState: PageState): typeof fetch {
           } else {
             // No ad, clear attempts.
             manifest.consecutiveAdResponses = 0;
+            manifest.backupIndex = 0;
+            // A capped (360p) backup only bridges the break: go back to
+            // the original quality once it's over.
+            if (manifest.backupStream?.lowQuality) {
+              logger.log(
+                `Ad break over: leaving low-quality backup stream '${manifest.backupStream.playerType}'.`
+              );
+              manifest.backupStream = null;
+              manifest.replacementMap = null;
+            }
           }
         }
       }
@@ -1170,7 +1238,8 @@ function getHighlightOfAdUrl(url: string | undefined): string | undefined {
 function getDefaultPlaybackAccessTokenQueryAndHeaders(
   channel: string,
   anonymousMode: boolean,
-  playerType?: string
+  playerType?: string,
+  platform?: string
 ): { query: any; headersMap: Map<string, string> } {
   const isVod = /^\d+$/.test(channel); // VODs have numeric IDs.
   const cookieMap = new Map<string, string>(
@@ -1188,7 +1257,7 @@ function getDefaultPlaybackAccessTokenQueryAndHeaders(
         isLive: !isVod,
         isVod: isVod,
         login: isVod ? "" : channel,
-        platform: "web",
+        platform: platform ?? "web",
         playerType: playerType ?? "site",
         vodID: isVod ? channel : "",
       },
@@ -1396,6 +1465,168 @@ function parseUsherManifest(manifest: string): Map<string, string> | null {
   return parsedManifest;
 }
 
+//#region Backup streams
+
+/**
+ * Headers that tie a token request to this browser session. Copied from the
+ * page's own PlaybackAccessToken request so a backup token is asked for the
+ * way the web player asks, not as a stranger.
+ */
+const SESSION_HEADERS = [
+  "Client-Integrity",
+  "Client-Session-Id",
+  "Client-Version",
+  "Device-ID",
+  "X-Device-Id",
+];
+
+/**
+ * Fetches a PlaybackAccessToken for a backup stream, never through a proxy:
+ * the player type, not the IP, is what keeps this session ad-free.
+ * Runs in the page scope, which holds the cookies and cached headers.
+ */
+async function fetchBackupPlaybackAccessToken(
+  pageState: PageState,
+  cachedPlaybackTokenRequestHeaders: Map<string, string> | null,
+  backupStream: BackupStream
+): Promise<PlaybackAccessToken | null> {
+  try {
+    const channelName = findChannelFromTwitchTvUrl(location.href);
+    if (!channelName) return null;
+    const anonymousMode = pageState.state?.anonymousMode === true;
+    const { query, headersMap } = getDefaultPlaybackAccessTokenQueryAndHeaders(
+      channelName,
+      anonymousMode,
+      backupStream.playerType,
+      backupStream.platform
+    );
+    if (cachedPlaybackTokenRequestHeaders != null) {
+      for (const name of SESSION_HEADERS) {
+        const value = getHeaderFromMap(cachedPlaybackTokenRequestHeaders, name);
+        if (value != null) setHeaderToMap(headersMap, name, value);
+      }
+    }
+    const response = await NATIVE_FETCH(
+      new Request("https://gql.twitch.tv/gql", {
+        method: "POST",
+        headers: Object.fromEntries(headersMap),
+        body: JSON.stringify(query),
+      })
+    );
+    if (!response.ok) {
+      logger.warn(
+        `Backup token (${backupStream.playerType}) refused: HTTP ${response.status}`
+      );
+      return null;
+    }
+    const json = await response.json();
+    return json?.data?.streamPlaybackAccessToken ?? null;
+  } catch (error) {
+    logger.warn(`Backup token (${backupStream.playerType}) failed:`, error);
+    return null;
+  }
+}
+
+/**
+ * Tries the backup streams in order, starting where the current ad break
+ * left off, and points `manifest.replacementMap` at the first one whose
+ * media playlist for the requested quality has no ad.
+ *
+ * Every request here goes out unproxied (`NATIVE_FETCH`, and the URLs are
+ * put on the non-proxy list by the caller).
+ * @returns The backup stream switched to, or null if none was clean.
+ */
+async function switchToBackupStream(
+  pageState: PageState,
+  cachedUsherRequestUrl: string | null,
+  manifest: UsherManifest,
+  requestedUrl: string
+): Promise<BackupStream | null> {
+  if (cachedUsherRequestUrl == null) return null;
+  const backupStreams = getBackupStreams(
+    pageState.state?.backupStreamsAllowLowQuality !== false
+  );
+  const requestedKey =
+    [...manifest.assignedMap].find(([, url]) => url === requestedUrl)?.[0] ??
+    null;
+
+  while (manifest.backupIndex < backupStreams.length) {
+    const backupStream = backupStreams[manifest.backupIndex++];
+    const label = `${backupStream.playerType}/${backupStream.platform}`;
+    try {
+      logger.log(`Trying backup stream '${label}'…`);
+      const tokenResponse =
+        await pageState.sendMessageToPageScriptAndWaitForResponse(
+          "worker",
+          { type: MessageType.NewPlaybackAccessToken, backupStream },
+          MessageType.NewPlaybackAccessTokenResponse
+        );
+      const token: PlaybackAccessToken | undefined =
+        tokenResponse?.newPlaybackAccessToken;
+      if (token == null) {
+        logger.warn(`Backup stream '${label}': no token.`);
+        continue;
+      }
+
+      const usherUrl = getReplacementUsherUrl(cachedUsherRequestUrl, token);
+      if (usherUrl == null) continue;
+      const usherUrlObject = new URL(usherUrl);
+      if (usherUrlObject.searchParams.has("platform")) {
+        usherUrlObject.searchParams.set("platform", backupStream.platform);
+      }
+      const usherResponse = await NATIVE_FETCH(usherUrlObject.toString());
+      const usherBody = await usherResponse.text();
+      if (!usherResponse.ok || !usherBody.startsWith("#EXTM3U")) {
+        logger.warn(
+          `Backup stream '${label}': Usher HTTP ${usherResponse.status}.`
+        );
+        continue;
+      }
+
+      const replacementMap = buildBackupReplacementMap(
+        manifest.assignedMap,
+        manifest.assignedVariants,
+        parseMasterPlaylist(usherBody)
+      );
+      const checkUrl =
+        (requestedKey != null ? replacementMap.get(requestedKey) : null) ??
+        null;
+      if (checkUrl == null) {
+        logger.warn(
+          `Backup stream '${label}': no variant compatible with '${requestedKey}' (codec or ladder).`
+        );
+        continue;
+      }
+
+      const mediaResponse = await NATIVE_FETCH(checkUrl);
+      const mediaBody = await mediaResponse.text();
+      if (!mediaResponse.ok) {
+        logger.warn(
+          `Backup stream '${label}': media playlist HTTP ${mediaResponse.status}.`
+        );
+        continue;
+      }
+      if (mediaPlaylistHasAd(mediaBody)) {
+        logger.log(`Backup stream '${label}' has an ad too.`);
+        continue;
+      }
+
+      logger.log(
+        `Switched to backup stream '${label}':`,
+        Object.fromEntries(replacementMap)
+      );
+      manifest.replacementMap = replacementMap;
+      manifest.backupStream = backupStream;
+      return backupStream;
+    } catch (error) {
+      logger.warn(`Backup stream '${label}' failed:`, error);
+    }
+  }
+  return null;
+}
+
+//#endregion
+
 /**
  * Updates the replacement Video Weaver URLs.
  * @param pageState
@@ -1450,6 +1681,7 @@ async function updateVideoWeaverReplacementMap(
       Object.fromEntries(replacementMap)
     );
     manifest.replacementMap = replacementMap;
+    manifest.backupStream = null;
 
     // Send replacement Video Weaver URLs to content script.
     const videoWeaverUrls = [...replacementMap.values()];

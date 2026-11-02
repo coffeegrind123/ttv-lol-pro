@@ -292,6 +292,62 @@
           </ul>
         </section>
 
+        <!-- Ad blocking without a proxy -->
+        <section id="backup-streams" class="section">
+          <h2>Ad blocking without a proxy</h2>
+          <ul class="options-list">
+            <li>
+              <input
+                type="checkbox"
+                name="backup-streams-enabled-checkbox"
+                id="backup-streams-enabled-checkbox"
+              />
+              <label for="backup-streams-enabled-checkbox">
+                Switch to an ad-free backup stream during ads
+              </label>
+              <br />
+              <small>
+                When an ad gets through (or no proxy works), plays the same live
+                stream requested as another Twitch player (mobile, popout,
+                embed), which Twitch serves without ads. Each one is checked for
+                ads before switching. Works without any proxy.
+              </small>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                name="backup-streams-low-quality-checkbox"
+                id="backup-streams-low-quality-checkbox"
+              />
+              <label for="backup-streams-low-quality-checkbox">
+                Allow a 360p backup as last resort
+              </label>
+              <br />
+              <small>
+                Twitch caps its "autoplay" player at 360p. Used only for the
+                rest of the ad break when every full-quality backup has ads.
+              </small>
+            </li>
+            <li>
+              <input
+                type="checkbox"
+                name="decline-display-ads-checkbox"
+                id="decline-display-ads-checkbox"
+              />
+              <label for="decline-display-ads-checkbox">
+                Block display ads
+              </label>
+              <br />
+              <small>
+                The ads Twitch shows next to the stream (above chat,
+                squeezeback, lower third, pause ads). Stops Twitch from
+                requesting them for the rest of the page visit. Not applied on
+                whitelisted channels. Takes effect on the next page load.
+              </small>
+            </li>
+          </ul>
+        </section>
+
         <!-- Automatic proxies -->
         <section id="auto-proxies" class="section">
           <h2>Automatic proxies</h2>
@@ -344,6 +400,25 @@
             </thead>
             <tbody id="auto-proxies-table-body"></tbody>
           </table>
+          <details class="auto-proxies-details">
+            <summary>Why proxies were rejected</summary>
+            <small>
+              The latest rejections, newest first. "Blocked by Twitch's CDN" and
+              "outside the selected countries" are properties of the proxy;
+              "unreachable" can also mean your network blocks proxy connections.
+            </small>
+            <table class="auto-proxies-table">
+              <thead>
+                <tr>
+                  <th>When</th>
+                  <th>Proxy</th>
+                  <th>Why</th>
+                  <th>Details</th>
+                </tr>
+              </thead>
+              <tbody id="auto-proxies-failures-table-body"></tbody>
+            </table>
+          </details>
           <details class="auto-proxies-details">
             <summary>Countries</summary>
             <small>

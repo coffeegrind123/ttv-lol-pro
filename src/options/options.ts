@@ -113,7 +113,20 @@ const whitelistedChannelsListElement = $(
 const whitelistSubscriptionsCheckboxElement = $(
   "#whitelist-subscriptions-checkbox"
 ) as HTMLInputElement;
+// Backup streams
+const backupStreamsEnabledCheckboxElement = $(
+  "#backup-streams-enabled-checkbox"
+) as HTMLInputElement;
+const backupStreamsLowQualityCheckboxElement = $(
+  "#backup-streams-low-quality-checkbox"
+) as HTMLInputElement;
+const declineDisplayAdsCheckboxElement = $(
+  "#decline-display-ads-checkbox"
+) as HTMLInputElement;
 // Automatic proxies
+const autoProxiesFailuresTableBodyElement = $(
+  "#auto-proxies-failures-table-body"
+) as HTMLTableSectionElement;
 const autoProxiesEnabledCheckboxElement = $(
   "#auto-proxies-enabled-checkbox"
 ) as HTMLInputElement;
@@ -242,6 +255,20 @@ function main() {
       store.state.activeChannelSubscriptions = [];
     }
   });
+  // Backup streams
+  backupStreamsEnabledCheckboxElement.addEventListener("change", () => {
+    store.state.backupStreamsEnabled =
+      backupStreamsEnabledCheckboxElement.checked;
+    backupStreamsLowQualityCheckboxElement.disabled =
+      !store.state.backupStreamsEnabled;
+  });
+  backupStreamsLowQualityCheckboxElement.addEventListener("change", () => {
+    store.state.backupStreamsAllowLowQuality =
+      backupStreamsLowQualityCheckboxElement.checked;
+  });
+  declineDisplayAdsCheckboxElement.addEventListener("change", () => {
+    store.state.declineDisplayAds = declineDisplayAdsCheckboxElement.checked;
+  });
   // Automatic proxies
   autoProxiesEnabledCheckboxElement.addEventListener("change", () => {
     store.state.autoProxiesEnabled = autoProxiesEnabledCheckboxElement.checked;
@@ -287,7 +314,12 @@ function main() {
     const keys = Object.keys(changes);
     if (
       keys.some(key =>
-        ["autoProxies", "autoProxyStatus", "autoProxiesEnabled"].includes(key)
+        [
+          "autoProxies",
+          "autoProxyRecentFailures",
+          "autoProxyStatus",
+          "autoProxiesEnabled",
+        ].includes(key)
       )
     ) {
       updateAutoProxiesUI();
@@ -407,6 +439,14 @@ function updateUI() {
   });
   whitelistSubscriptionsCheckboxElement.checked =
     store.state.whitelistChannelSubscriptions;
+  // Backup streams
+  backupStreamsEnabledCheckboxElement.checked =
+    store.state.backupStreamsEnabled;
+  backupStreamsLowQualityCheckboxElement.checked =
+    store.state.backupStreamsAllowLowQuality;
+  backupStreamsLowQualityCheckboxElement.disabled =
+    !store.state.backupStreamsEnabled;
+  declineDisplayAdsCheckboxElement.checked = store.state.declineDisplayAds;
   // Automatic proxies
   autoProxiesEnabledCheckboxElement.checked = store.state.autoProxiesEnabled;
   autoProxiesPoolSizeInputElement.value = `${store.state.autoProxyPoolSize}`;
@@ -705,6 +745,31 @@ function updateAutoProxiesUI() {
     actionCell.append(removeButton);
     row.append(actionCell);
     autoProxiesTableBodyElement.append(row);
+  }
+
+  const failureLabels: Record<string, string> = {
+    cdn: "Blocked by Twitch's CDN",
+    country: "Outside the selected countries",
+    leak: "Bypassed",
+    twitch: "Refused by Twitch",
+    unreachable: "Unreachable",
+    playlist: "Stream didn't load",
+    ads: "Let ads through",
+  };
+  autoProxiesFailuresTableBodyElement.innerHTML = "";
+  for (const failure of store.state.autoProxyRecentFailures) {
+    const row = document.createElement("tr");
+    for (const value of [
+      formatAgo(failure.at),
+      failure.url,
+      failureLabels[failure.kind] ?? failure.kind,
+      failure.reason,
+    ]) {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      row.append(cell);
+    }
+    autoProxiesFailuresTableBodyElement.append(row);
   }
 }
 //#endregion
@@ -1039,8 +1104,11 @@ exportButtonElement.addEventListener("click", () => {
     autoProxyCountries: store.state.autoProxyCountries,
     autoProxyPoolSize: store.state.autoProxyPoolSize,
     autoProxySourceUrls: store.state.autoProxySourceUrls,
+    backupStreamsAllowLowQuality: store.state.backupStreamsAllowLowQuality,
+    backupStreamsEnabled: store.state.backupStreamsEnabled,
     customPassport: store.state.customPassport,
     customPassportEnabled: store.state.customPassportEnabled,
+    declineDisplayAds: store.state.declineDisplayAds,
     normalProxies: store.state.normalProxies,
     optimizedProxies: store.state.optimizedProxies,
     optimizedProxiesEnabled: store.state.optimizedProxiesEnabled,
